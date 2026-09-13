@@ -1,13 +1,13 @@
 // UserRoutes.js
-// Routes for: Authentication (R.6), Resume/JD upload (R.1.2, R.1.3),
+// Routes for: Authentication (R.6), Resume upload (R.1.2),
 // Post-interview outcomes (R.4), Progress dashboard data (R.5.1)
 
 const express = require('express');
 const router = express.Router();
 
 const userController = require('../controllers/userController');
-const authMiddleware = require('../middleware/authMiddleware.');
-const upload = require('../middleware/uploadMiddleware'); // e.g. multer config for resume files
+const authMiddleware = require('../middleware/authMiddleware');
+const { resumeUpload } = require('../middleware/uploadMiddleware');
 
 // ---------------------------
 // Auth Routes (R.6)
@@ -39,23 +39,19 @@ router.get('/me', authMiddleware, userController.getProfile);
 router.put('/me', authMiddleware, userController.updateProfile);
 
 // ---------------------------
-// Resume & Job Description (R.1.2, R.1.3)
+// Resume (R.1.2)
 // ---------------------------
 
 // R.1.2 - Upload and parse resume
 router.post(
   '/me/resume',
   authMiddleware,
-  upload.single('resume'),
+  resumeUpload.single('resume'),
   userController.uploadResume
 );
 
 // Fetch parsed resume data
-router.post('/me/resume', authMiddleware, resumeUpload.single('resume'), userController.uploadResume);
-
-
-// R.1.3 - Submit/paste job description for personalization
-router.post('/me/job-description', authMiddleware, userController.addJobDescription);
+router.get('/me/resume', authMiddleware, userController.getResume);
 
 // ---------------------------
 // Post-Interview Outcomes (R.4)
