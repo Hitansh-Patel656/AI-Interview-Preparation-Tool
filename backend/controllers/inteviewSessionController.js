@@ -1,39 +1,35 @@
 const mongoose = require("mongoose");
 const InterviewSession = require("../models/InterviewSession");
-const User = require("../models/User");
 const JobDescription = require("../models/JobDescription");
 
+const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+// ---------------------------
+// R.1.4 - Create a new interview session for the logged-in user
+// ---------------------------
 const createInterviewSession = async (req, res) => {
     try {
-        const { user_id, role, interview_type, job_description_id } = req.body;
+        const { role, interview_type, job_description_id } = req.body;
 
-        if (!user_id || !role || !interview_type) {
-            return res.status(400).json({
-                message: "user_id, role, and interview_type are required"
-            });
-        }
-
-        if (!mongoose.Types.ObjectId.isValid(user_id)) {
-            return res.status(400).json({ message: "Invalid user_id" });
-        }
-
-        const userExists = await User.findById(user_id);
-        if (!userExists) {
-            return res.status(404).json({ message: "Referenced user does not exist" });
+        if (!role || !interview_type) {
+            return res.status(400).json({ message: "role and interview_type are required" });
         }
 
         if (job_description_id) {
-            if (!mongoose.Types.ObjectId.isValid(job_description_id)) {
+            if (!isValidId(job_description_id)) {
                 return res.status(400).json({ message: "Invalid job_description_id" });
             }
-            const jdExists = await JobDescription.findById(job_description_id);
+            const jdExists = await JobDescription.findOne({
+                _id: job_description_id,
+                user_id: req.user.id
+            });
             if (!jdExists) {
-                return res.status(404).json({ message: "Referenced job description does not exist" });
+                return res.status(404).json({ message: "Job description not found" });
             }
         }
 
         const interviewSession = await InterviewSession.create({
-            user_id,
+            user_id: req.user.id, // taken from the authenticated user, never the request body
             role,
             interview_type,
             job_description_id: job_description_id || undefined
@@ -48,15 +44,19 @@ const createInterviewSession = async (req, res) => {
     }
 };
 
+// ---------------------------
+// Get one session — only if it belongs to the logged-in user
+// ---------------------------
 const getInterviewSession = async (req, res) => {
     try {
-        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        if (!isValidId(req.params.id)) {
             return res.status(400).json({ message: "Invalid interview session id" });
         }
 
-        const interviewSession = await InterviewSession.findById(req.params.id)
-            .populate("user_id", "name email")
-            .populate("job_description_id");
+        const interviewSession = await InterviewSession.findOne({
+            _id: req.params.id,
+            user_id: req.user.id
+        }).populate("job_description_id");
 
         if (!interviewSession) {
             return res.status(404).json({ message: "Interview session not found" });
@@ -68,21 +68,12 @@ const getInterviewSession = async (req, res) => {
     }
 };
 
-
+// ---------------------------
+// List sessions — always scoped to the logged-in user, never a client-supplied id
+// ---------------------------
 const getAllInterviewSessions = async (req, res) => {
     try {
-        const filter = {};
-
-        
-        if (req.query.user_id) {
-            if (!mongoose.Types.ObjectId.isValid(req.query.user_id)) {
-                return res.status(400).json({ message: "Invalid user_id filter" });
-            }
-            filter.user_id = req.query.user_id;
-        }
-
-        const interviewSessions = await InterviewSession.find(filter)
-            .populate("user_id", "name email")
+        const interviewSessions = await InterviewSession.find({ user_id: req.user.id })
             .sort({ createdAt: -1 });
 
         res.status(200).json(interviewSessions);
@@ -91,63 +82,12 @@ const getAllInterviewSessions = async (req, res) => {
     }
 };
 
-const updateInterviewSession = async (req, res) => {
-    try {
-        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-            return res.status(400).json({ message: "Invalid interview session id" });
-        }
-
-        if (req.body.job_description_id === undefined) {
-            return res.status(400).json({ message: "job_description_id is required to update" });
-        }
-
-        if (!mongoose.Types.ObjectId.isValid(req.body.job_description_id)) {
-            return res.status(400).json({ message: "Invalid job_description_id" });
-        }
-
-        const jdExists = await JobDescription.findById(req.body.job_description_id);
-        if (!jdExists) {
-            return res.status(404).json({ message: "Referenced job description does not exist" });
-        }
-
-        const interviewSession = await InterviewSession.findByIdAndUpdate(
-            req.params.id,
-            { job_description_id: req.body.job_description_id },
-            { new: true, runValidators: true }
-        );
-
-        if (!interviewSession) {
-            return res.status(404).json({ message: "Interview session not found" });
-        }
-
-        res.status(200).json(interviewSession);
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-};
-
-const deleteInterviewSession = async (req, res) => {
-    try {
-        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-            return res.status(400).json({ message: "Invalid interview session id" });
-        }
-
-        const interviewSession = await InterviewSession.findByIdAndDelete(req.params.id);
-        if (!interviewSession) {
-            return res.status(404).json({ message: "Interview session not found" });
-        }
-
-        // See cascade-delete note below — deliberately not cascading here yet
-        res.status(200).json({ message: "Interview session deleted" });
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-};
-
-
+// ---------------------------
+// Update session status (e.g. in_progress -> completed/abandoned)
+// ---------------------------
 const updateInterviewSessionStatus = async (req, res) => {
     try {
-        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        if (!isValidId(req.params.id)) {
             return res.status(400).json({ message: "Invalid interview session id" });
         }
 
@@ -165,8 +105,8 @@ const updateInterviewSessionStatus = async (req, res) => {
             updates.ended_at = new Date();
         }
 
-        const interviewSession = await InterviewSession.findByIdAndUpdate(
-            req.params.id,
+        const interviewSession = await InterviewSession.findOneAndUpdate(
+            { _id: req.params.id, user_id: req.user.id },
             updates,
             { new: true, runValidators: true }
         );
@@ -185,6 +125,5 @@ module.exports = {
     createInterviewSession,
     getAllInterviewSessions,
     getInterviewSession,
-    updateInterviewSession,
-    deleteInterviewSession
+    updateInterviewSessionStatus
 };

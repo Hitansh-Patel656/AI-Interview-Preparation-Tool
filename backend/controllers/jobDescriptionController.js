@@ -1,25 +1,24 @@
 const mongoose = require("mongoose");
 const JobDescription = require("../models/JobDescription");
-const User = require("../models/User");
 
 const createJobDescription = async (req, res) => {
     try {
-        const { user_id, raw_text } = req.body;
+        const { raw_text } = req.body;
 
-        if (!user_id || !raw_text) {
-            return res.status(400).json({ message: "user_id and raw_text are required" });
+        if (!raw_text) {
+            return res.status(400).json({ message: "raw_text is required" });
         }
 
-        if (!mongoose.Types.ObjectId.isValid(user_id)) {
-            return res.status(400).json({ message: "Invalid user_id" });
-        }
+        // Delegate keyword/requirement extraction to a parsing service.
+        // const parsed_keywords = await jdParserService.parse(raw_text);
+        const parsed_keywords = []; // placeholder
 
-        const userExists = await User.findById(user_id);
-        if (!userExists) {
-            return res.status(404).json({ message: "Referenced user does not exist" });
-        }
+        const jobDescription = await JobDescription.create({
+            user_id: req.user.id, // taken from the authenticated user, never the request body
+            raw_text,
+            parsed_keywords
+        });
 
-        const jobDescription = await JobDescription.create({ user_id, raw_text });
         res.status(201).json(jobDescription);
     } catch (error) {
         if (error.name === "ValidationError") {
@@ -31,17 +30,9 @@ const createJobDescription = async (req, res) => {
 
 const getAllJobDescriptions = async (req, res) => {
     try {
-        const filter = {};
+        const jobDescriptions = await JobDescription.find({ user_id: req.user.id })
+            .sort({ createdAt: -1 });
 
-        // Without this, one user could pull every other user's job descriptions
-        if (req.query.user_id) {
-            if (!mongoose.Types.ObjectId.isValid(req.query.user_id)) {
-                return res.status(400).json({ message: "Invalid user_id filter" });
-            }
-            filter.user_id = req.query.user_id;
-        }
-
-        const jobDescriptions = await JobDescription.find(filter).sort({ createdAt: -1 });
         res.status(200).json(jobDescriptions);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -54,7 +45,11 @@ const getJobDescription = async (req, res) => {
             return res.status(400).json({ message: "Invalid job description id" });
         }
 
-        const jobDescription = await JobDescription.findById(req.params.id);
+        const jobDescription = await JobDescription.findOne({
+            _id: req.params.id,
+            user_id: req.user.id
+        });
+
         if (!jobDescription) {
             return res.status(404).json({ message: "Job description not found" });
         }
@@ -77,8 +72,8 @@ const updateJobDescription = async (req, res) => {
             return res.status(400).json({ message: "raw_text is required to update" });
         }
 
-        const jobDescription = await JobDescription.findByIdAndUpdate(
-            req.params.id,
+        const jobDescription = await JobDescription.findOneAndUpdate(
+            { _id: req.params.id, user_id: req.user.id },
             { raw_text: req.body.raw_text },
             { new: true, runValidators: true }
         );
@@ -102,7 +97,11 @@ const deleteJobDescription = async (req, res) => {
             return res.status(400).json({ message: "Invalid job description id" });
         }
 
-        const jobDescription = await JobDescription.findByIdAndDelete(req.params.id);
+        const jobDescription = await JobDescription.findOneAndDelete({
+            _id: req.params.id,
+            user_id: req.user.id
+        });
+
         if (!jobDescription) {
             return res.status(404).json({ message: "Job description not found" });
         }

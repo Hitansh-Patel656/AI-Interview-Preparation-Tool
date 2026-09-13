@@ -20,17 +20,64 @@ const userSchema = new mongoose.Schema(
         },
         password_hash: {
             type: String,
-            required: [true, "Password is required"],
+            // Not required for OAuth-created accounts (R.6.2)
+            required: function () {
+                return !this.oauthProvider;
+            },
             minlength: [8, "Password must be at least 8 characters"],
             select: false // excluded from query results by default
-        }
+        },
+
+        // --- OAuth (R.6.2) ---
+        oauthProvider: {
+            type: String,
+            enum: ["google", "firebase", "auth0", null],
+            default: null
+        },
+        oauthProviderId: {
+            type: String,
+            default: null
+        },
+
+        // --- Resume (R.1.2) ---
+        resume: {
+            fileName: String,
+            filePath: String,
+            parsedData: {
+                skills: [String],
+                experience: [String],
+                projects: [String]
+            },
+            uploadedAt: Date
+        },
+
+       
+
+        // --- Post-Interview Outcomes (R.4) ---
+        outcomes: [
+            {
+                companyName: { type: String, required: true },
+                role: { type: String, required: true },
+                round: String,
+                outcome: {
+                    type: String,
+                    enum: ["offer", "rejected", "in-progress", "no-response"],
+                    required: true
+                },
+                difficulty: {
+                    type: String,
+                    enum: ["easy", "medium", "hard"]
+                },
+                submittedAt: { type: Date, default: Date.now }
+            }
+        ]
     },
     { timestamps: true }
 );
 
 // Hash password before saving, only if it was modified
 userSchema.pre("save", async function (next) {
-    if (!this.isModified("password_hash")) return next();
+    if (!this.isModified("password_hash") || !this.password_hash) return next();
     try {
         const salt = await bcrypt.genSalt(10);
         this.password_hash = await bcrypt.hash(this.password_hash, salt);
@@ -40,7 +87,7 @@ userSchema.pre("save", async function (next) {
     }
 });
 
-// Same hashing logic for findByIdAndUpdate-style updates
+// Same hashing logic for findOneAndUpdate-style updates
 userSchema.pre("findOneAndUpdate", async function (next) {
     const update = this.getUpdate();
     if (update.password_hash) {

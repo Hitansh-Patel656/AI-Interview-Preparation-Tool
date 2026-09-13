@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const VALID_INTERVIEW_TYPES = ["Technical", "HR", "Behavioral"];
 
 const interviewSessionSchema = new mongoose.Schema(
-    {
+{
         user_id: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "User",

@@ -1,12 +1,26 @@
 const User = require("../models/User");
-const mongoose = require("mongoose");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
-const createUser = async (req, res) => {
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1h";
+const REFRESH_EXPIRES_IN = process.env.REFRESH_EXPIRES_IN || "7d";
+
+const signAccessToken = (userId) =>
+    jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+
+const signRefreshToken = (userId) =>
+    jwt.sign({ sub: userId, type: "refresh" }, JWT_SECRET, { expiresIn: REFRESH_EXPIRES_IN });
+
+// ---------------------------
+// R.6.1 - Register
+// ---------------------------
+const register = async (req, res) => {
     try {
-        const { name, email, password_hash } = req.body;
+        const { name, email, password } = req.body;
 
-        if (!name || !email || !password_hash) {
-            return res.status(400).json({ message: "name, email, and password_hash are required" });
+        if (!name || !email || !password) {
+            return res.status(400).json({ message: "name, email, and password are required" });
         }
 
         const existing = await User.findOne({ email: email.toLowerCase() });
@@ -14,9 +28,10 @@ const createUser = async (req, res) => {
             return res.status(409).json({ message: "Email already in use" });
         }
 
-        const user = await User.create({ name, email, password_hash });
+        const user = await User.create({ name, email: email.toLowerCase(), password_hash: password });
+
         const { password_hash: _, ...safeUser } = user.toObject();
-        res.status(201).json(safeUser);
+        res.status(201).json({ user: safeUser });
     } catch (error) {
         if (error.name === "ValidationError") {
             return res.status(400).json({ message: error.message });
@@ -25,22 +40,117 @@ const createUser = async (req, res) => {
     }
 };
 
-const getUsers = async (req, res) => {
+// ---------------------------
+// R.6.2 - Login
+// ---------------------------
+const login = async (req, res) => {
     try {
-        const users = await User.find(); // password_hash excluded via select:false
-        res.json(users);
+        const { email, password } = req.body;
+        if (!email || !password) {
+            return res.status(400).json({ message: "email and password are required" });
+        }
+
+        // password_hash must be select:false in schema, so explicitly include it here
+        const user = await User.findOne({ email: email.toLowerCase() }).select("+password_hash");
+        if (!user) {
+            return res.status(401).json({ message: "Invalid credentials" });
+        }
+
+        const match = await user.comparePassword(password);
+        if (!match) {
+            return res.status(401).json({ message: "Invalid credentials" });
+        }
+
+        const accessToken = signAccessToken(user._id);
+        const refreshToken = signRefreshToken(user._id);
+
+        const { password_hash: _, ...safeUser } = user.toObject();
+        res.json({ user: safeUser, accessToken, refreshToken });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
 };
 
-const getUserById = async (req, res) => {
+// ---------------------------
+// R.6.2 - OAuth callback (Firebase/Auth0)
+// ---------------------------
+const oauthCallback = async (req, res) => {
     try {
-        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-            return res.status(400).json({ message: "Invalid user id" });
+        // Expect the frontend to have already exchanged the code and sent
+        // verified profile info (or an id_token to verify server-side).
+        const { email, name, providerId, provider } = req.body;
+
+        if (!email || !providerId) {
+            return res.status(400).json({ message: "email and providerId are required" });
         }
 
-        const user = await User.findById(req.params.id);
+        let user = await User.findOne({ email: email.toLowerCase() });
+        if (!user) {
+            user = await User.create({
+                name: name || email.split("@")[0],
+                email: email.toLowerCase(),
+                oauthProvider: provider,
+                oauthProviderId: providerId
+            });
+        }
+
+        const accessToken = signAccessToken(user._id);
+        const refreshToken = signRefreshToken(user._id);
+
+        const { password_hash: _, ...safeUser } = user.toObject();
+        res.json({ user: safeUser, accessToken, refreshToken });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// ---------------------------
+// Refresh token
+// ---------------------------
+const refreshToken = async (req, res) => {
+    try {
+        const { refreshToken: token } = req.body;
+        if (!token) {
+            return res.status(400).json({ message: "refreshToken is required" });
+        }
+
+        let payload;
+        try {
+            payload = jwt.verify(token, JWT_SECRET);
+        } catch {
+            return res.status(401).json({ message: "Invalid or expired refresh token" });
+        }
+
+        if (payload.type !== "refresh") {
+            return res.status(401).json({ message: "Invalid token type" });
+        }
+
+        const accessToken = signAccessToken(payload.sub);
+        res.json({ accessToken });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// ---------------------------
+// R.6.3 - Logout
+// ---------------------------
+const logout = async (req, res) => {
+    try {
+        // If using a token blocklist/session store, invalidate it here.
+        // Stateless JWT setups can simply instruct the client to discard tokens.
+        res.json({ message: "Logged out successfully" });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// ---------------------------
+// Profile
+// ---------------------------
+const getProfile = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
         if (!user) {
             return res.status(404).json({ message: "User not found" });
         }
@@ -50,20 +160,19 @@ const getUserById = async (req, res) => {
     }
 };
 
-const updateUser = async (req, res) => {
+const updateProfile = async (req, res) => {
     try {
-        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-            return res.status(400).json({ message: "Invalid user id" });
-        }
-
-        // Prevent updating sensitive/unexpected fields directly
-        const allowedUpdates = ["name", "email", "password_hash"];
+        const allowedUpdates = ["name", "email"];
         const updates = {};
         for (const key of allowedUpdates) {
             if (req.body[key] !== undefined) updates[key] = req.body[key];
         }
 
-        const user = await User.findByIdAndUpdate(req.params.id, updates, {
+        if (req.body.password) {
+            updates.password_hash = req.body.password;
+        }
+
+        const user = await User.findByIdAndUpdate(req.user.id, updates, {
             new: true,
             runValidators: true
         });
@@ -84,27 +193,114 @@ const updateUser = async (req, res) => {
     }
 };
 
-const deleteUser = async (req, res) => {
+// ---------------------------
+// R.1.2 - Resume upload/parse
+// ---------------------------
+const uploadResume = async (req, res) => {
     try {
-        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-            return res.status(400).json({ message: "Invalid user id" });
+        if (!req.file) {
+            return res.status(400).json({ message: "resume file is required" });
         }
 
-        const user = await User.findByIdAndDelete(req.params.id);
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
+        // Delegate actual text extraction to a parsing service/module.
+        // const parsedData = await resumeParserService.parse(req.file);
+        const parsedData = { skills: [], experience: [], projects: [] }; // placeholder
+
+        const user = await User.findByIdAndUpdate(
+            req.user.id,
+            {
+                resume: {
+                    fileName: req.file.originalname,
+                    filePath: req.file.path,
+                    parsedData,
+                    uploadedAt: new Date()
+                }
+            },
+            { new: true }
+        );
+
+        res.status(201).json({ message: "Resume uploaded and parsed", resume: user.resume });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+const getResume = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id).select("resume");
+        if (!user || !user.resume) {
+            return res.status(404).json({ message: "No resume found" });
+        }
+        res.json(user.resume);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+
+
+// ---------------------------
+// R.4 - Post-interview outcomes
+// ---------------------------
+const submitOutcome = async (req, res) => {
+    try {
+        const { companyName, role, round, outcome, difficulty } = req.body;
+        if (!companyName || !role || !outcome) {
+            return res.status(400).json({ message: "companyName, role, and outcome are required" });
         }
 
-        res.json({ message: "User deleted" });
+        const user = await User.findByIdAndUpdate(
+            req.user.id,
+            {
+                $push: {
+                    outcomes: { companyName, role, round, outcome, difficulty, submittedAt: new Date() }
+                }
+            },
+            { new: true }
+        );
+
+        res.status(201).json({ message: "Outcome submitted", outcomes: user.outcomes });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+const getOutcomes = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id).select("outcomes");
+        res.json(user?.outcomes || []);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// ---------------------------
+// R.5.1 - Progress dashboard
+// ---------------------------
+const getProgress = async (req, res) => {
+    try {
+        // In practice this likely queries a separate Sessions/Scores collection
+        // keyed by userId rather than living on the User document itself.
+        // const progress = await SessionModel.find({ userId: req.user.id });
+        const progress = []; // placeholder
+
+        res.json({ sessions: progress });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
 };
 
 module.exports = {
-    createUser,
-    getUsers,
-    getUserById,
-    updateUser,
-    deleteUser
+    register,
+    login,
+    oauthCallback,
+    refreshToken,
+    logout,
+    getProfile,
+    updateProfile,
+    uploadResume,
+    getResume,
+    submitOutcome,
+    getOutcomes,
+    getProgress
 };
