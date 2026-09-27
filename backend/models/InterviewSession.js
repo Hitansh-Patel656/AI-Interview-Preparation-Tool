@@ -22,8 +22,7 @@ const interviewSessionSchema = new mongoose.Schema(
             }
         },
         job_description_id: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "JobDescription",
+            type: String, // PostgreSQL UUID
             required: false // per SRS: JD is optional, session must work without it
         },
 				status: {

@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const InterviewSession = require("../models/InterviewSession");
-const JobDescription = require("../models/JobDescription");
+const jobDescriptionRepository = require("../repositories/jobDescriptionRepository");
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
@@ -16,13 +17,10 @@ const createInterviewSession = async (req, res) => {
         }
 
         if (job_description_id) {
-            if (!isValidId(job_description_id)) {
+            if (!UUID_REGEX.test(job_description_id)) {
                 return res.status(400).json({ message: "Invalid job_description_id" });
             }
-            const jdExists = await JobDescription.findOne({
-                _id: job_description_id,
-                user_id: req.user.id
-            });
+            const jdExists = await jobDescriptionRepository.findByIdAndUserId(job_description_id, req.user.id);
             if (!jdExists) {
                 return res.status(404).json({ message: "Job description not found" });
             }
@@ -53,10 +51,18 @@ const getInterviewSession = async (req, res) => {
             return res.status(400).json({ message: "Invalid interview session id" });
         }
 
-        const interviewSession = await InterviewSession.findOne({
+        let interviewSession = await InterviewSession.findOne({
             _id: req.params.id,
             user_id: req.user.id
-        }).populate("job_description_id");
+        }).lean();
+
+        if (interviewSession && interviewSession.job_description_id) {
+            // Emulate the population of the job description
+            interviewSession.job_description = await jobDescriptionRepository.findByIdAndUserId(
+                interviewSession.job_description_id,
+                req.user.id
+            );
+        }
 
         if (!interviewSession) {
             return res.status(404).json({ message: "Interview session not found" });
