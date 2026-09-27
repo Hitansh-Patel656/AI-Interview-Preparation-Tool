@@ -34,6 +34,7 @@ testConnection()
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use("/api/users", require("./routes/userRoutes"));
+app.use("/api/job-descriptions", require("./routes/jobDescriptionRoutes"));
 
 // GET /api/health
 // Development-only health check. Reports application and database connectivity
