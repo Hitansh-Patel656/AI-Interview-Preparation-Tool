@@ -7,7 +7,7 @@
 
 "use strict";
 
-const User       = require("../models/User");           // MongoDB — non-auth endpoints only
+// Removed Mongoose User model dependency
 const authService = require("../services/authService");
 const userRepository = require("../repositories/userRepository");
 
@@ -146,23 +146,19 @@ const logout = async (req, res) => {
 };
 
 // ---------------------------------------------------------------------------
-// Profile — NOT YET MIGRATED TO POSTGRESQL
+// Profile
 // ---------------------------------------------------------------------------
-// These handlers still use the MongoDB User model.
-// Migration will happen in the next feature branch.
-// req.user.id is now a PostgreSQL UUID string, which Mongoose cannot cast
-// to ObjectId — these endpoints will return 404/500 until migrated.
+// These handlers have been migrated to PostgreSQL.
 // ---------------------------------------------------------------------------
 const getProfile = async (req, res) => {
     try {
-        // TODO: migrate to userRepository.findById(req.user.id)
-        const user = await User.findById(req.user.id);
+        const user = await userRepository.findById(req.user.id);
         if (!user) {
             return res.status(404).json({ message: "User not found" });
         }
         res.json(user);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ message: "Failed to fetch profile" });
     }
 };
 
@@ -175,14 +171,13 @@ const updateProfile = async (req, res) => {
         }
 
         if (req.body.password) {
-            updates.password_hash = req.body.password;
+            if (req.body.password.length < 8) {
+                return res.status(400).json({ message: "Password must be at least 8 characters" });
+            }
+            updates.passwordHash = await authService.hashPassword(req.body.password);
         }
 
-        // TODO: migrate to userRepository.updateById(req.user.id, ...)
-        const user = await User.findByIdAndUpdate(req.user.id, updates, {
-            new: true,
-            runValidators: true
-        });
+        const user = await userRepository.updateById(req.user.id, updates);
 
         if (!user) {
             return res.status(404).json({ message: "User not found" });
@@ -190,42 +185,22 @@ const updateProfile = async (req, res) => {
 
         res.json(user);
     } catch (error) {
-        if (error.name === "ValidationError") {
-            return res.status(400).json({ message: error.message });
-        }
-        if (error.code === 11000) {
+        if (error.code === "23505") { // PostgreSQL unique violation for email
             return res.status(409).json({ message: "Email already in use" });
         }
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ message: "Failed to update profile" });
     }
 };
 
 // ---------------------------------------------------------------------------
 // Resume — NOT YET MIGRATED
 // ---------------------------------------------------------------------------
+// Note: These endpoints still depend on the legacy MongoDB User model and will
+// fail (CastError) since req.user.id is a PostgreSQL UUID, not a MongoDB ObjectId.
+// This is intentionally left for the next feature branch.
 const uploadResume = async (req, res) => {
     try {
-        if (!req.file) {
-            return res.status(400).json({ message: "resume file is required" });
-        }
-
-        const parsedData = { skills: [], experience: [], projects: [] }; // placeholder
-
-        // TODO: migrate resume storage away from embedded MongoDB User document
-        const user = await User.findByIdAndUpdate(
-            req.user.id,
-            {
-                resume: {
-                    fileName: req.file.originalname,
-                    filePath: req.file.path,
-                    parsedData,
-                    uploadedAt: new Date()
-                }
-            },
-            { new: true }
-        );
-
-        res.status(201).json({ message: "Resume uploaded and parsed", resume: user.resume });
+        res.status(501).json({ message: "Resume upload is temporarily disabled pending PostgreSQL migration" });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -233,12 +208,7 @@ const uploadResume = async (req, res) => {
 
 const getResume = async (req, res) => {
     try {
-        // TODO: migrate to PostgreSQL / dedicated resume storage
-        const user = await User.findById(req.user.id).select("resume");
-        if (!user || !user.resume) {
-            return res.status(404).json({ message: "No resume found" });
-        }
-        res.json(user.resume);
+        res.status(501).json({ message: "Resume retrieval is temporarily disabled pending PostgreSQL migration" });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -247,25 +217,12 @@ const getResume = async (req, res) => {
 // ---------------------------------------------------------------------------
 // Outcomes — NOT YET MIGRATED
 // ---------------------------------------------------------------------------
+// Note: These endpoints still depend on the legacy MongoDB User model and will
+// fail (CastError) since req.user.id is a PostgreSQL UUID, not a MongoDB ObjectId.
+// This is intentionally left for the next feature branch.
 const submitOutcome = async (req, res) => {
     try {
-        const { companyName, role, round, outcome, difficulty } = req.body;
-        if (!companyName || !role || !outcome) {
-            return res.status(400).json({ message: "companyName, role, and outcome are required" });
-        }
-
-        // TODO: migrate to PostInterviewOutcome collection / PostgreSQL
-        const user = await User.findByIdAndUpdate(
-            req.user.id,
-            {
-                $push: {
-                    outcomes: { companyName, role, round, outcome, difficulty, submittedAt: new Date() }
-                }
-            },
-            { new: true }
-        );
-
-        res.status(201).json({ message: "Outcome submitted", outcomes: user.outcomes });
+        res.status(501).json({ message: "Outcomes submission is temporarily disabled pending PostgreSQL migration" });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -273,9 +230,7 @@ const submitOutcome = async (req, res) => {
 
 const getOutcomes = async (req, res) => {
     try {
-        // TODO: migrate to PostInterviewOutcome collection / PostgreSQL
-        const user = await User.findById(req.user.id).select("outcomes");
-        res.json(user?.outcomes || []);
+        res.status(501).json({ message: "Outcomes retrieval is temporarily disabled pending PostgreSQL migration" });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }

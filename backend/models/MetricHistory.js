@@ -5,8 +5,7 @@ const VALID_METRICS = ["pace", "filler_words", "star_score", "content_score"];
 const metricHistorySchema = new mongoose.Schema(
     {
         user_id: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "User",
+            type: String, // PostgreSQL UUID
             required: [true, "user_id is required"]
         },
         metric_name: {
