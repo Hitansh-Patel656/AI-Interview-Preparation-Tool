@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const STARAnalysis = require("../models/STARAnalysis");
 const Answer = require("../models/Answer");
+const { verifyAnswerOwner } = require("../utils/authUtils");
 
 const createSTARAnalysis = async (req, res) => {
     try {
@@ -18,6 +19,11 @@ const createSTARAnalysis = async (req, res) => {
 
         const answerExists = await Answer.findById(answer_id);
         if (!answerExists) {
+            return res.status(404).json({ message: "Referenced answer does not exist" });
+        }
+
+        const isOwner = await verifyAnswerOwner(answer_id, req.user.id);
+        if (!isOwner) {
             return res.status(404).json({ message: "Referenced answer does not exist" });
         }
 
@@ -55,6 +61,11 @@ const getSTARAnalysis = async (req, res) => {
             return res.status(404).json({ message: "STAR analysis not found" });
         }
 
+        const isOwner = await verifyAnswerOwner(starAnalysis.answer_id, req.user.id);
+        if (!isOwner) {
+            return res.status(404).json({ message: "STAR analysis not found" });
+        }
+
         res.status(200).json(starAnalysis);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -69,6 +80,11 @@ const getSTARAnalysisByAnswer = async (req, res) => {
 
         const starAnalysis = await STARAnalysis.findOne({ answer_id: req.params.answerId });
         if (!starAnalysis) {
+            return res.status(404).json({ message: "No STAR analysis found for this answer" });
+        }
+
+        const isOwner = await verifyAnswerOwner(req.params.answerId, req.user.id);
+        if (!isOwner) {
             return res.status(404).json({ message: "No STAR analysis found for this answer" });
         }
 
@@ -87,6 +103,12 @@ const getAllSTARAnalysis = async (req, res) => {
                 return res.status(400).json({ message: "Invalid answer_id filter" });
             }
             filter.answer_id = req.query.answer_id;
+            const isOwner = await verifyAnswerOwner(req.query.answer_id, req.user.id);
+            if (!isOwner) {
+                return res.status(200).json([]);
+            }
+        } else {
+            return res.status(400).json({ message: "answer_id filter is required" });
         }
 
         const starAnalyses = await STARAnalysis.find(filter);

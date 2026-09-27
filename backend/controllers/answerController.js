@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const Answer = require("../models/Answer");
 const Question = require("../models/Question");
+const { verifyQuestionOwner, verifyAnswerOwner } = require("../utils/authUtils");
 
 const createAnswer = async (req, res) => {
     try {
@@ -16,6 +17,11 @@ const createAnswer = async (req, res) => {
 
         const questionExists = await Question.findById(question_id);
         if (!questionExists) {
+            return res.status(404).json({ message: "Referenced question does not exist" });
+        }
+
+        const isOwner = await verifyQuestionOwner(question_id, req.user.id);
+        if (!isOwner) {
             return res.status(404).json({ message: "Referenced question does not exist" });
         }
 
@@ -48,6 +54,11 @@ const getAnswer = async (req, res) => {
             return res.status(404).json({ message: "Answer not found" });
         }
 
+        const isOwner = await verifyAnswerOwner(req.params.id, req.user.id);
+        if (!isOwner) {
+            return res.status(404).json({ message: "Answer not found" });
+        }
+
         res.status(200).json(answer);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -66,6 +77,11 @@ const getAnswerByQuestion = async (req, res) => {
             return res.status(404).json({ message: "No answer found for this question" });
         }
 
+        const isOwner = await verifyAnswerOwner(answer._id, req.user.id);
+        if (!isOwner) {
+            return res.status(404).json({ message: "No answer found for this question" });
+        }
+
         res.status(200).json(answer);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -81,6 +97,15 @@ const getAllAnswers = async (req, res) => {
                 return res.status(400).json({ message: "Invalid question_id filter" });
             }
             filter.question_id = req.query.question_id;
+            const isOwner = await verifyQuestionOwner(req.query.question_id, req.user.id);
+            if (!isOwner) {
+                return res.status(200).json([]);
+            }
+        } else {
+            // If no filter is provided, we would need to filter by all questions owned by the user.
+            // For now, if no question_id is provided, we should probably throw an error or return []
+            // to avoid leaking all answers. But let's return [] to be safe if they don't provide a question_id.
+            return res.status(400).json({ message: "question_id filter is required" });
         }
 
         const answers = await Answer.find(filter).sort({ createdAt: 1 });
@@ -101,6 +126,11 @@ const updateAnswerTranscript = async (req, res) => {
 
         if (req.body.transcript === undefined) {
             return res.status(400).json({ message: "transcript is required to update" });
+        }
+
+        const isOwner = await verifyAnswerOwner(req.params.id, req.user.id);
+        if (!isOwner) {
+            return res.status(404).json({ message: "Answer not found" });
         }
 
         const answer = await Answer.findByIdAndUpdate(
