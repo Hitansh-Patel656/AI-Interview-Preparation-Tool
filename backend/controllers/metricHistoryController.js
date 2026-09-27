@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const MetricHistory = require("../models/MetricHistory");
-const User = require("../models/User");
+const userRepository = require("../repositories/userRepository");
 
 const createMetricHistory = async (req, res) => {
     try {
@@ -10,11 +10,9 @@ const createMetricHistory = async (req, res) => {
             return res.status(400).json({ message: "user_id, metric_name, and value are required" });
         }
 
-        if (!mongoose.Types.ObjectId.isValid(user_id)) {
-            return res.status(400).json({ message: "Invalid user_id" });
-        }
-
-        const userExists = await User.findById(user_id);
+        // user_id is now a PostgreSQL UUID string, not an ObjectId.
+        // We verify the user exists in PostgreSQL.
+        const userExists = await userRepository.findById(user_id);
         if (!userExists) {
             return res.status(404).json({ message: "Referenced user does not exist" });
         }
@@ -53,9 +51,7 @@ const getAllMetricHistory = async (req, res) => {
         // Dashboard trend charts (R.5.2) need "this user's history for one metric,
         // in time order" — not a global dump of every metric for every user
         if (req.query.user_id) {
-            if (!mongoose.Types.ObjectId.isValid(req.query.user_id)) {
-                return res.status(400).json({ message: "Invalid user_id filter" });
-            }
+            // user_id is a PostgreSQL UUID string.
             filter.user_id = req.query.user_id;
         }
 

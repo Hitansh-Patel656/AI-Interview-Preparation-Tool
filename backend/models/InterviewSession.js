@@ -5,8 +5,7 @@ const VALID_INTERVIEW_TYPES = ["Technical", "HR", "Behavioral"];
 const interviewSessionSchema = new mongoose.Schema(
 {
         user_id: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "User",
+            type: String, // PostgreSQL UUID
             required: [true, "user_id is required"]
         },
         role: {
