@@ -10,6 +10,8 @@
 // Removed Mongoose User model dependency
 const authService = require("../services/authService");
 const userRepository = require("../repositories/userRepository");
+const resumeRepository = require("../repositories/resumeRepository");
+const fs = require("fs").promises;
 
 // ---------------------------------------------------------------------------
 // R.6.1 - Register
@@ -193,24 +195,59 @@ const updateProfile = async (req, res) => {
 };
 
 // ---------------------------------------------------------------------------
-// Resume — NOT YET MIGRATED
+// Resume
 // ---------------------------------------------------------------------------
-// Note: These endpoints still depend on the legacy MongoDB User model and will
-// fail (CastError) since req.user.id is a PostgreSQL UUID, not a MongoDB ObjectId.
-// This is intentionally left for the next feature branch.
 const uploadResume = async (req, res) => {
     try {
-        res.status(501).json({ message: "Resume upload is temporarily disabled pending PostgreSQL migration" });
+        if (!req.file) {
+            return res.status(400).json({ message: "resume file is required" });
+        }
+
+        // Fetch existing resume to know if we need to clean up an old file LATER
+        const existingResume = await resumeRepository.findByUserId(req.user.id);
+        const parsedData = { skills: [], experience: [], projects: [] }; // placeholder
+
+        const resume = await resumeRepository.upsert(
+            req.user.id,
+            req.file.originalname,
+            req.file.path,
+            parsedData
+        );
+
+        // Delete old file ONLY AFTER successful database upsert
+        if (existingResume && existingResume.filePath && existingResume.filePath !== req.file.path) {
+            fs.unlink(existingResume.filePath).catch((err) => {
+                if (err.code !== "ENOENT") {
+                    console.error("Failed to delete old resume file:", err);
+                }
+            });
+        }
+
+        const { filePath, ...publicResume } = resume;
+        res.status(201).json({ message: "Resume uploaded and parsed", resume: publicResume });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        // If DB upsert fails, clean up the newly uploaded file to avoid orphans
+        if (req.file) {
+            fs.unlink(req.file.path).catch((err) => {
+                if (err.code !== "ENOENT") {
+                    console.error("Failed to clean up new resume file after DB error:", err);
+                }
+            });
+        }
+        res.status(500).json({ message: "Failed to upload resume" });
     }
 };
 
 const getResume = async (req, res) => {
     try {
-        res.status(501).json({ message: "Resume retrieval is temporarily disabled pending PostgreSQL migration" });
+        const resume = await resumeRepository.findByUserId(req.user.id);
+        if (!resume) {
+            return res.status(404).json({ message: "No resume found" });
+        }
+        const { filePath, ...publicResume } = resume;
+        res.json(publicResume);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ message: "Failed to retrieve resume" });
     }
 };
 
