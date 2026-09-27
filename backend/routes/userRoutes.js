@@ -1,5 +1,5 @@
 // UserRoutes.js
-// Routes for: Authentication (R.6), Resume upload (R.1.2),
+// Routes for: Authentication (R.6 — email/password only), Resume upload (R.1.2),
 // Post-interview outcomes (R.4), Progress dashboard data (R.5.1)
 
 const express = require('express');
@@ -19,10 +19,7 @@ router.post('/register', userController.register);
 // R.6.2 - Login (email/password)
 router.post('/login', userController.login);
 
-// R.6.2 - OAuth login/callback (Firebase/Auth0)
-router.post('/oauth/callback', userController.oauthCallback);
-
-// Refresh session/JWT
+// Refresh session token
 router.post('/refresh-token', userController.refreshToken);
 
 // R.6.3 - Logout (requires active session)
