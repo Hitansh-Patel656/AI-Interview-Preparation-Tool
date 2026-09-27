@@ -1,6 +1,11 @@
-// authMiddleware.js
+// middleware/authMiddleware.js
 // Verifies the JWT access token from the Authorization header
-// and attaches { id } to req.user for use in controllers.
+// and attaches { id: postgresUserUUID } to req.user for use in controllers.
+//
+// Refresh tokens are now opaque random strings (not JWTs), so there is no
+// longer any need to guard against a refresh-type JWT payload here.
+
+"use strict";
 
 const jwt = require("jsonwebtoken");
 
@@ -26,11 +31,7 @@ const authMiddleware = (req, res, next) => {
             return res.status(401).json({ message: "Invalid token" });
         }
 
-        // Reject refresh tokens being used as access tokens
-        if (payload.type === "refresh") {
-            return res.status(401).json({ message: "Invalid token type" });
-        }
-
+        // payload.sub is the PostgreSQL users.id UUID string.
         req.user = { id: payload.sub };
         next();
     } catch (error) {
