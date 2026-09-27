@@ -43,7 +43,14 @@ router.put('/me', authMiddleware, userController.updateProfile);
 router.post(
   '/me/resume',
   authMiddleware,
-  resumeUpload.single('resume'),
+  (req, res, next) => {
+    resumeUpload.single('resume')(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({ message: err.message || 'Upload failed' });
+      }
+      next();
+    });
+  },
   userController.uploadResume
 );
 
