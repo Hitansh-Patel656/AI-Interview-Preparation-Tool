@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const BodyLanguageAnalysis = require("../models/BodyLanguageAnalysis");
 const Answer = require("../models/Answer");
+const { verifyAnswerOwner } = require("../utils/authUtils");
 
 const createBodyLanguageAnalysis = async (req, res) => {
     try {
@@ -18,6 +19,11 @@ const createBodyLanguageAnalysis = async (req, res) => {
 
         const answer = await Answer.findById(answer_id);
         if (!answer) {
+            return res.status(404).json({ message: "Referenced answer does not exist" });
+        }
+
+        const isOwner = await verifyAnswerOwner(answer_id, req.user.id);
+        if (!isOwner) {
             return res.status(404).json({ message: "Referenced answer does not exist" });
         }
 
@@ -63,6 +69,11 @@ const getBodyLanguageAnalysis = async (req, res) => {
             return res.status(404).json({ message: "Body-language analysis not found" });
         }
 
+        const isOwner = await verifyAnswerOwner(bodyLanguageAnalysis.answer_id, req.user.id);
+        if (!isOwner) {
+            return res.status(404).json({ message: "Body-language analysis not found" });
+        }
+
         res.status(200).json(bodyLanguageAnalysis);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -77,6 +88,11 @@ const getBodyLanguageAnalysisByAnswer = async (req, res) => {
 
         const bodyLanguageAnalysis = await BodyLanguageAnalysis.findOne({ answer_id: req.params.answerId });
         if (!bodyLanguageAnalysis) {
+            return res.status(404).json({ message: "No body-language analysis found for this answer" });
+        }
+
+        const isOwner = await verifyAnswerOwner(req.params.answerId, req.user.id);
+        if (!isOwner) {
             return res.status(404).json({ message: "No body-language analysis found for this answer" });
         }
 
@@ -95,6 +111,12 @@ const getAllBodyLanguageAnalysis = async (req, res) => {
                 return res.status(400).json({ message: "Invalid answer_id filter" });
             }
             filter.answer_id = req.query.answer_id;
+            const isOwner = await verifyAnswerOwner(req.query.answer_id, req.user.id);
+            if (!isOwner) {
+                return res.status(200).json([]);
+            }
+        } else {
+            return res.status(400).json({ message: "answer_id filter is required" });
         }
 
         const bodyLanguageAnalyses = await BodyLanguageAnalysis.find(filter);

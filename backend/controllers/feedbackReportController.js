@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const FeedbackReport = require("../models/FeedbackReport"); // fixed: was importing itself from controllers
 const InterviewSession = require("../models/InterviewSession");
+const { verifySessionOwner } = require("../utils/authUtils");
 
 const createFeedbackReport = async (req, res) => {
     try {
@@ -16,6 +17,11 @@ const createFeedbackReport = async (req, res) => {
 
         const sessionExists = await InterviewSession.findById(session_id);
         if (!sessionExists) {
+            return res.status(404).json({ message: "Referenced interview session does not exist" });
+        }
+
+        const isOwner = await verifySessionOwner(session_id, req.user.id);
+        if (!isOwner) {
             return res.status(404).json({ message: "Referenced interview session does not exist" });
         }
 
@@ -43,10 +49,14 @@ const getFeedbackReport = async (req, res) => {
             return res.status(400).json({ message: "Invalid feedback report id" });
         }
 
-        const feedbackReport = await FeedbackReport.findById(req.params.id)
-            .populate("session_id");
+        const feedbackReport = await FeedbackReport.findById(req.params.id);
 
         if (!feedbackReport) {
+            return res.status(404).json({ message: "Feedback report not found" });
+        }
+
+        const isOwner = await verifySessionOwner(feedbackReport.session_id, req.user.id);
+        if (!isOwner) {
             return res.status(404).json({ message: "Feedback report not found" });
         }
 
@@ -70,6 +80,11 @@ const getFeedbackReportBySession = async (req, res) => {
             return res.status(404).json({ message: "No feedback report found for this session" });
         }
 
+        const isOwner = await verifySessionOwner(req.params.sessionId, req.user.id);
+        if (!isOwner) {
+            return res.status(404).json({ message: "No feedback report found for this session" });
+        }
+
         res.status(200).json(feedbackReport);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -78,7 +93,11 @@ const getFeedbackReportBySession = async (req, res) => {
 
 const getAllFeedbackReports = async (req, res) => {
     try {
-        const feedbackReports = await FeedbackReport.find().sort({ generated_at: -1 });
+        // Find all sessions owned by this user
+        const userSessions = await InterviewSession.find({ user_id: req.user.id }).select("_id").lean();
+        const sessionIds = userSessions.map(s => s._id);
+
+        const feedbackReports = await FeedbackReport.find({ session_id: { $in: sessionIds } }).sort({ generated_at: -1 });
         res.status(200).json(feedbackReports);
     } catch (error) {
         res.status(500).json({ message: error.message });

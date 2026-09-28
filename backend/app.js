@@ -11,8 +11,11 @@ const mongoose        = require("mongoose");
 const connectDB       = require("./config/db");
 const { testConnection } = require("./config/postgres");
 
+const path = require("path");
+
 // ─── Middleware ──────────────────────────────────────────────────────────────
 app.use(express.json());
+app.use("/uploads/videos", express.static(path.join(__dirname, "uploads/videos")));
 
 // ─── Database Initialization ─────────────────────────────────────────────────
 
@@ -35,6 +38,7 @@ testConnection()
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use("/api/users", require("./routes/userRoutes"));
 app.use("/api/job-descriptions", require("./routes/jobDescriptionRoutes"));
+app.use("/api/sessions", require("./routes/interviewSessionRoutes"));
 
 // GET /api/health
 // Development-only health check. Reports application and database connectivity

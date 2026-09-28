@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const ModelAnswer = require("../models/ModelAnswer");
 const Question = require("../models/Question");
+const { verifyQuestionOwner } = require("../utils/authUtils");
 
 const createModelAnswer = async (req, res) => {
     try {
@@ -16,6 +17,11 @@ const createModelAnswer = async (req, res) => {
 
         const questionExists = await Question.findById(question_id);
         if (!questionExists) {
+            return res.status(404).json({ message: "Referenced question does not exist" });
+        }
+
+        const isOwner = await verifyQuestionOwner(question_id, req.user.id);
+        if (!isOwner) {
             return res.status(404).json({ message: "Referenced question does not exist" });
         }
 
@@ -48,6 +54,11 @@ const getModelAnswer = async (req, res) => {
             return res.status(404).json({ message: "Model answer not found" });
         }
 
+        const isOwner = await verifyQuestionOwner(modelAnswer.question_id, req.user.id);
+        if (!isOwner) {
+            return res.status(404).json({ message: "Model answer not found" });
+        }
+
         res.status(200).json(modelAnswer);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -67,6 +78,11 @@ const getModelAnswerByQuestion = async (req, res) => {
             return res.status(404).json({ message: "No model answer found for this question" });
         }
 
+        const isOwner = await verifyQuestionOwner(req.params.questionId, req.user.id);
+        if (!isOwner) {
+            return res.status(404).json({ message: "No model answer found for this question" });
+        }
+
         res.status(200).json(modelAnswer);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -82,6 +98,12 @@ const getAllModelAnswers = async (req, res) => {
                 return res.status(400).json({ message: "Invalid question_id filter" });
             }
             filter.question_id = req.query.question_id;
+            const isOwner = await verifyQuestionOwner(req.query.question_id, req.user.id);
+            if (!isOwner) {
+                return res.status(200).json([]);
+            }
+        } else {
+            return res.status(400).json({ message: "question_id filter is required" });
         }
 
         const modelAnswers = await ModelAnswer.find(filter);

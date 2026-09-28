@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const DeliveryMetrics = require("../models/DeliveryMetrics");
 const Answer = require("../models/Answer");
+const { verifyAnswerOwner } = require("../utils/authUtils");
 
 const createDeliveryMetrics = async (req, res) => {
     try {
@@ -18,6 +19,11 @@ const createDeliveryMetrics = async (req, res) => {
 
         const answerExists = await Answer.findById(answer_id);
         if (!answerExists) {
+            return res.status(404).json({ message: "Referenced answer does not exist" });
+        }
+
+        const isOwner = await verifyAnswerOwner(answer_id, req.user.id);
+        if (!isOwner) {
             return res.status(404).json({ message: "Referenced answer does not exist" });
         }
 
@@ -56,6 +62,11 @@ const getDeliveryMetrics = async (req, res) => {
             return res.status(404).json({ message: "Delivery metrics not found" });
         }
 
+        const isOwner = await verifyAnswerOwner(deliveryMetrics.answer_id, req.user.id);
+        if (!isOwner) {
+            return res.status(404).json({ message: "Delivery metrics not found" });
+        }
+
         res.status(200).json(deliveryMetrics);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -70,6 +81,11 @@ const getDeliveryMetricsByAnswer = async (req, res) => {
 
         const deliveryMetrics = await DeliveryMetrics.findOne({ answer_id: req.params.answerId });
         if (!deliveryMetrics) {
+            return res.status(404).json({ message: "No delivery metrics found for this answer" });
+        }
+
+        const isOwner = await verifyAnswerOwner(req.params.answerId, req.user.id);
+        if (!isOwner) {
             return res.status(404).json({ message: "No delivery metrics found for this answer" });
         }
 
@@ -88,6 +104,12 @@ const getAllDeliveryMetrics = async (req, res) => {
                 return res.status(400).json({ message: "Invalid answer_id filter" });
             }
             filter.answer_id = req.query.answer_id;
+            const isOwner = await verifyAnswerOwner(req.query.answer_id, req.user.id);
+            if (!isOwner) {
+                return res.status(200).json([]);
+            }
+        } else {
+            return res.status(400).json({ message: "answer_id filter is required" });
         }
 
         const deliveryMetrics = await DeliveryMetrics.find(filter);
