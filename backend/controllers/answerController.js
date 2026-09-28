@@ -1,7 +1,25 @@
 const mongoose = require("mongoose");
 const Answer = require("../models/Answer");
 const Question = require("../models/Question");
-const { verifyQuestionOwner, verifyAnswerOwner } = require("../utils/authUtils");
+const InterviewSession = require("../models/InterviewSession");
+const STARAnalysis = require("../models/STARAnalysis");
+const ContentRelevanceScore = require("../models/ContentRelevanceScore");
+const ModelAnswer = require("../models/ModelAnswer");
+const { verifyQuestionOwner, verifyAnswerOwner, verifySessionOwner } = require("../utils/authUtils");
+const fs = require("fs/promises");
+const jobDescriptionRepository = require("../repositories/jobDescriptionRepository");
+const resumeRepository = require("../repositories/resumeRepository");
+const { evaluateAnswer } = require("../services/llm/answerEvaluator");
+const { generateFollowUpQuestion } = require("../services/llm/followUpGenerator");
+const { createQuestionForSession: persistQuestion } = require("./questionController");
+// Internal helper to avoid duplicating answer creation logic
+const _createAnswerLogic = async (question_id, transcript, audio_url, video_url) => {
+    const existingAnswer = await Answer.findOne({ question_id });
+    if (existingAnswer) {
+        throw { status: 409, message: "An answer already exists for this question" };
+    }
+    return await Answer.create({ question_id, transcript, audio_url, video_url });
+};
 
 const createAnswer = async (req, res) => {
     try {
@@ -149,10 +167,187 @@ const updateAnswerTranscript = async (req, res) => {
     }
 };
 
+const createAnswerForSession = async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({ message: "Invalid session id" });
+        }
+
+        const isSessionOwner = await verifySessionOwner(req.params.id, req.user.id);
+        if (!isSessionOwner) {
+            return res.status(404).json({ message: "Interview session not found" });
+        }
+
+        const { question_id, transcript, audio_url, video_url } = req.body;
+
+        if (!question_id) {
+            return res.status(400).json({ message: "question_id is required" });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(question_id)) {
+            return res.status(400).json({ message: "Invalid question_id" });
+        }
+
+        if (!transcript || typeof transcript !== "string" || transcript.trim().length === 0) {
+            return res.status(400).json({ message: "transcript is required and must be a non-empty string" });
+        }
+
+        const question = await Question.findById(question_id);
+        if (!question) {
+            return res.status(404).json({ message: "Referenced question does not exist" });
+        }
+
+        if (String(question.session_id) !== String(req.params.id)) {
+            return res.status(404).json({ message: "Question does not belong to this session" });
+        }
+
+        // Ownership of question is transitively proven by owning the session it belongs to
+        const answer = await _createAnswerLogic(question_id, transcript, audio_url, video_url);
+
+        let evaluationResult;
+        let generatedFollowUp = null;
+        let nextQuestion = null;
+
+        try {
+            // Load interview context
+            const session = await InterviewSession.findById(req.params.id);
+            let jdExists = null;
+            if (session.job_description_id) {
+                jdExists = await jobDescriptionRepository.findByIdAndUserId(session.job_description_id, req.user.id);
+            }
+            let resume = null;
+            try {
+                resume = await resumeRepository.findByUserId(req.user.id);
+            } catch (err) {
+                console.warn("[Answer Evaluation] Could not fetch resume context:", err.message);
+            }
+
+            // Call answerEvaluator
+            evaluationResult = await evaluateAnswer({
+                role: session.role,
+                interview_type: session.interview_type,
+                question: question.text,
+                transcript: transcript,
+                resume: resume,
+                jobDescription: jdExists
+            });
+
+            // Persist evaluation models
+            await ContentRelevanceScore.findOneAndUpdate(
+                { answer_id: answer._id },
+                { score: evaluationResult.content_relevance_score, notes: evaluationResult.content_relevance_notes },
+                { upsert: true, new: true, runValidators: true }
+            );
+
+            await STARAnalysis.findOneAndUpdate(
+                { answer_id: answer._id },
+                { star_compliance_rating: evaluationResult.star_rating, suggestions: evaluationResult.star_suggestions },
+                { upsert: true, new: true, runValidators: true }
+            );
+
+            await ModelAnswer.findOneAndUpdate(
+                { question_id: question._id },
+                { generated_text: evaluationResult.model_answer },
+                { upsert: true, new: true, runValidators: true }
+            );
+
+            // Follow-up generation
+            if (evaluationResult.follow_up_required) {
+                const existingFollowUp = await Question.findOne({ parent_question_id: question._id });
+                if (!existingFollowUp) {
+                    generatedFollowUp = await generateFollowUpQuestion({
+                        role: session.role,
+                        interview_type: session.interview_type,
+                        question: question.text,
+                        transcript: transcript,
+                        evaluation: evaluationResult,
+                        resume: resume,
+                        jobDescription: jdExists
+                    });
+
+                    nextQuestion = await persistQuestion({
+                        session_id: session._id,
+                        parent_question_id: question._id,
+                        text: generatedFollowUp.question,
+                        is_followup: true
+                    });
+                } else {
+                    nextQuestion = existingFollowUp;
+                }
+            }
+
+            res.status(201).json({
+                answer,
+                evaluation: {
+                    content_relevance: {
+                        score: evaluationResult.content_relevance_score,
+                        notes: evaluationResult.content_relevance_notes
+                    },
+                    star_analysis: {
+                        star_compliance_rating: evaluationResult.star_rating,
+                        suggestions: evaluationResult.star_suggestions
+                    },
+                    model_answer: {
+                        generated_text: evaluationResult.model_answer
+                    }
+                },
+                next_question: nextQuestion
+            });
+        } catch (error) {
+            console.error("[Answer Evaluation] AI evaluation failed:", error.message);
+            return res.status(500).json({ message: "Answer saved, but AI evaluation failed" });
+        }
+    } catch (error) {
+        if (error.status) {
+            return res.status(error.status).json({ message: error.message });
+        }
+        if (error.code === 11000) {
+            return res.status(409).json({ message: "An answer already exists for this question" });
+        }
+        if (error.name === "ValidationError") {
+            return res.status(400).json({ message: error.message });
+        }
+        res.status(500).json({ message: error.message });
+    }
+};
+
+const uploadVideoForSession = async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            if (req.file) {
+                await fs.unlink(req.file.path).catch(err => console.error(`Cleanup failed for ${req.file.path}:`, err));
+            }
+            return res.status(400).json({ message: "Invalid session id" });
+        }
+
+        const isOwner = await verifySessionOwner(req.params.id, req.user.id);
+        if (!isOwner) {
+            if (req.file) {
+                await fs.unlink(req.file.path).catch(err => console.error(`Cleanup failed for ${req.file.path}:`, err));
+            }
+            return res.status(404).json({ message: "Interview session not found" });
+        }
+
+        if (!req.file) {
+            return res.status(400).json({ message: "video file is required" });
+        }
+
+        const video_url = `/uploads/videos/${req.file.filename}`;
+        res.status(200).json({ video_url });
+    } catch (error) {
+        if (req.file) {
+            await fs.unlink(req.file.path).catch(err => console.error(`Cleanup failed for ${req.file.path}:`, err));
+        }
+        res.status(500).json({ message: error.message });
+    }
+};
+
 module.exports = {
     createAnswer,
     getAnswer,
     getAnswerByQuestion,
     getAllAnswers,
-    updateAnswerTranscript
+    updateAnswerTranscript,
+    createAnswerForSession,
+    uploadVideoForSession
 };

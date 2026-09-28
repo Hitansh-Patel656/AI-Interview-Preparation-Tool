@@ -59,6 +59,24 @@ const getAllQuestions = async (req, res) => {
     }
 };
 
+const getQuestionsForSession = async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({ message: "Invalid session id" });
+        }
+
+        const session = await findOwnedSession(req.params.id, req.user.id);
+        if (!session) {
+            return res.status(404).json({ message: "Interview session not found" });
+        }
+
+        const questions = await Question.find({ session_id: req.params.id }).sort({ createdAt: 1 });
+        res.status(200).json(questions);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 // ---------------------------
 // Get a single question — only if its session belongs to the user
 // ---------------------------
@@ -114,5 +132,6 @@ module.exports = {
     createQuestionForSession, // internal use only — do not add a route for this
     getAllQuestions,
     getQuestion,
-    getFollowUpsForQuestion
+    getFollowUpsForQuestion,
+    getQuestionsForSession
 };
