@@ -225,8 +225,14 @@ const uploadResume = async (req, res) => {
                 if (err.code !== "ENOENT") console.error("Failed to clean up file after parse error:", err);
             });
             console.error("[Resume Parse Error]:", parseError.message);
-            // Return 400 Bad Request to client, but don't leak stack traces
-            return res.status(400).json({ message: "Failed to parse resume: " + parseError.message });
+
+            if (parseError.name === 'ResumeUpstreamError') {
+                return res.status(502).json({ message: "Upstream parser unavailable or returned invalid data" });
+            } else if (parseError.name === 'ResumeParseError') {
+                return res.status(400).json({ message: "Failed to parse resume: " + parseError.message });
+            } else {
+                return res.status(500).json({ message: "Internal server error during resume parsing" });
+            }
         }
 
         const resume = await resumeRepository.upsert(

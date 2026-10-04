@@ -33,7 +33,19 @@ const mockFsPromises = {
 
 const mockResumeParser = {
     parseResume: async (filePath, originalName) => {
-        if (filePath === "fail") throw new Error("Parse Error");
+        if (filePath === "fail_upstream") {
+            const err = new Error("Upstream Error");
+            err.name = "ResumeUpstreamError";
+            throw err;
+        }
+        if (filePath === "fail_parse") {
+            const err = new Error("Parse Error");
+            err.name = "ResumeParseError";
+            throw err;
+        }
+        if (filePath === "fail_generic") {
+            throw new Error("Generic Error");
+        }
         return { skills: ["test"], experience: [], education: [] };
     }
 };
@@ -69,7 +81,7 @@ const runTests = async () => {
         const req = mockReq({ file: { path: "newFile", originalname: "resume.pdf" } });
         const res = mockRes();
         await uploadResume(req, res);
-        
+
         assert.strictEqual(res.statusCode, 201);
         assert.deepStrictEqual(db["u1"].parsedData, { skills: ["test"], experience: [], education: [] });
     });
@@ -80,7 +92,7 @@ const runTests = async () => {
         const req = mockReq({ file: { path: "newFile", originalname: "resume.pdf" } });
         const res = mockRes();
         await uploadResume(req, res);
-        
+
         assert.strictEqual(res.statusCode, 201);
         assert.strictEqual(db["u1"].filePath, "newFile");
         assert.ok(fsDeletes.includes("oldFile"), "Old file should be deleted");
@@ -113,17 +125,39 @@ const runTests = async () => {
         assert.deepStrictEqual(res.data.parsedData, { skills: ["test"] });
     });
 
-    addTest("15. Failed parsing cleans up file and does not persist", async () => {
+    addTest("15. Parse failure cleans up file and does not persist (400)", async () => {
         db = { "u1": { fileName: "old", filePath: "oldFile" } };
         fsDeletes = [];
-        const req = mockReq({ file: { path: "fail", originalname: "resume.pdf" } });
+        const req = mockReq({ file: { path: "fail_parse", originalname: "resume.pdf" } });
         const res = mockRes();
         await uploadResume(req, res);
-        
+
         assert.strictEqual(res.statusCode, 400);
-        assert.ok(fsDeletes.includes("fail"), "New file should be cleaned up");
+        assert.ok(fsDeletes.includes("fail_parse"), "New file should be cleaned up");
         assert.strictEqual(db["u1"].fileName, "old", "DB should not be updated");
         assert.strictEqual(fsDeletes.includes("oldFile"), false, "Old file should not be deleted");
+    });
+
+    addTest("16. Upstream failure cleans up file and does not persist (502)", async () => {
+        db = { "u1": { fileName: "old", filePath: "oldFile" } };
+        fsDeletes = [];
+        const req = mockReq({ file: { path: "fail_upstream", originalname: "resume.pdf" } });
+        const res = mockRes();
+        await uploadResume(req, res);
+
+        assert.strictEqual(res.statusCode, 502);
+        assert.ok(fsDeletes.includes("fail_upstream"));
+    });
+
+    addTest("17. Generic failure cleans up file and does not persist (500)", async () => {
+        db = { "u1": { fileName: "old", filePath: "oldFile" } };
+        fsDeletes = [];
+        const req = mockReq({ file: { path: "fail_generic", originalname: "resume.pdf" } });
+        const res = mockRes();
+        await uploadResume(req, res);
+
+        assert.strictEqual(res.statusCode, 500);
+        assert.ok(fsDeletes.includes("fail_generic"));
     });
 
     for (const test of testCases) {

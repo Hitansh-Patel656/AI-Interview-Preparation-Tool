@@ -32,6 +32,19 @@ const mockLlmService = {
         if (prompt.includes("MISSING_EXPERIENCE")) experience = [];
         if (prompt.includes("MISSING_SKILLS")) skills = [];
 
+        if (prompt.includes("ALL_NULL_EXPERIENCE")) {
+            experience = [{ job_title: null, company: " ", start_date: null, end_date: null, description: "" }];
+        }
+        if (prompt.includes("ALL_NULL_EDUCATION")) {
+            education = [{ degree: null, institution: "   ", start_date: null, end_date: null, field: null }];
+        }
+        if (prompt.includes("PARTIAL_EXPERIENCE")) {
+            experience = [{ job_title: "SWE", company: null, start_date: null, end_date: null, description: null }];
+        }
+        if (prompt.includes("PARTIAL_EDUCATION")) {
+            education = [{ degree: null, institution: "MIT", start_date: null, end_date: null, field: null }];
+        }
+
         // Note: returning directly as object, but parseExtractedText parses raw object
         return { skills, experience, education };
     }
@@ -110,15 +123,59 @@ const runTests = async () => {
 
     addTest("7. Malformed/unsupported document", async () => {
         await assert.rejects(extractText("test_unsupported.txt", "resume.txt"), /Unsupported file format/);
-        await assert.rejects(extractText("test_bad.pdf", "resume.pdf"), /Invalid PDF format/);
+        await assert.rejects(extractText("test_bad.pdf", "resume.pdf"), /Failed to extract text from document/);
+    });
+
+    addTest("7b. Text > 50,000 characters", async () => {
+        await fs.writeFile("test_large.pdf", "A".repeat(50001));
+        await assert.rejects(extractText("test_large.pdf", "resume.pdf"), /Resume text is too long to parse/);
+        await fs.unlink("test_large.pdf").catch(() => {});
+    });
+
+    addTest("7c. Text exactly 50,000 characters", async () => {
+        const textToInject = "A".repeat(50000 - 14); // Account for _PDF_EXTRACTED
+        await fs.writeFile("test_exact.pdf", textToInject);
+        const txt = await extractText("test_exact.pdf", "resume.pdf");
+        assert.strictEqual(txt.length, 50000);
+        await fs.unlink("test_exact.pdf").catch(() => {});
     });
 
     addTest("8. Malformed structured Gemini response", async () => {
-        await assert.rejects(parseResume("test_malformed.pdf", "resume.pdf"), /expected array, received string/);
+        await assert.rejects(parseResume("test_malformed.pdf", "resume.pdf"), /LLM returned malformed structured data/);
     });
 
     addTest("9. Gemini parsing failure", async () => {
-        await assert.rejects(parseResume("test_fail_llm.pdf", "resume.pdf"), /LLM failure/);
+        await assert.rejects(parseResume("test_fail_llm.pdf", "resume.pdf"), /Failed to communicate with LLM parser/);
+    });
+
+    addTest("10. All-null experience -> rejected/filtered", async () => {
+        await fs.writeFile("test_all_null_exp.pdf", "ALL_NULL_EXPERIENCE");
+        const result = await parseResume("test_all_null_exp.pdf", "resume.pdf");
+        assert.strictEqual(result.experience.length, 0);
+        await fs.unlink("test_all_null_exp.pdf").catch(() => {});
+    });
+
+    addTest("11. All-null education -> rejected/filtered", async () => {
+        await fs.writeFile("test_all_null_edu.pdf", "ALL_NULL_EDUCATION");
+        const result = await parseResume("test_all_null_edu.pdf", "resume.pdf");
+        assert.strictEqual(result.education.length, 0);
+        await fs.unlink("test_all_null_edu.pdf").catch(() => {});
+    });
+
+    addTest("12. Partially populated experience -> allowed", async () => {
+        await fs.writeFile("test_partial_exp.pdf", "PARTIAL_EXPERIENCE");
+        const result = await parseResume("test_partial_exp.pdf", "resume.pdf");
+        assert.strictEqual(result.experience.length, 1);
+        assert.strictEqual(result.experience[0].job_title, "SWE");
+        await fs.unlink("test_partial_exp.pdf").catch(() => {});
+    });
+
+    addTest("13. Partially populated education -> allowed", async () => {
+        await fs.writeFile("test_partial_edu.pdf", "PARTIAL_EDUCATION");
+        const result = await parseResume("test_partial_edu.pdf", "resume.pdf");
+        assert.strictEqual(result.education.length, 1);
+        assert.strictEqual(result.education[0].institution, "MIT");
+        await fs.unlink("test_partial_edu.pdf").catch(() => {});
     });
 
     for (const test of testCases) {
