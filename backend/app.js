@@ -15,7 +15,6 @@ const path = require("path");
 
 // ─── Middleware ──────────────────────────────────────────────────────────────
 app.use(express.json());
-app.use("/uploads/videos", express.static(path.join(__dirname, "uploads/videos")));
 
 // ─── Database Initialization ─────────────────────────────────────────────────
 

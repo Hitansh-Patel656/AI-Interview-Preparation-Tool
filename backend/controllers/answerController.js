@@ -7,11 +7,28 @@ const ContentRelevanceScore = require("../models/ContentRelevanceScore");
 const ModelAnswer = require("../models/ModelAnswer");
 const { verifyQuestionOwner, verifyAnswerOwner, verifySessionOwner } = require("../utils/authUtils");
 const fs = require("fs/promises");
+const { createReadStream, statSync } = require("fs");
+const path = require("path");
 const jobDescriptionRepository = require("../repositories/jobDescriptionRepository");
 const resumeRepository = require("../repositories/resumeRepository");
 const { evaluateAnswer } = require("../services/llm/answerEvaluator");
 const { generateFollowUpQuestion } = require("../services/llm/followUpGenerator");
 const { createQuestionForSession: persistQuestion } = require("./questionController");
+
+// Robust directory containment check for video files
+const getSafeVideoPath = (videoUrl) => {
+    if (!videoUrl) return null;
+    const expectedDir = path.resolve(__dirname, "..", "uploads", "videos");
+    const rawFilename = path.basename(videoUrl);
+    const resolvedPath = path.resolve(expectedDir, rawFilename);
+    const relative = path.relative(expectedDir, resolvedPath);
+    // Check if relative path points outside expected directory, is absolute (different drive on Windows), or is empty (the directory itself)
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+        return null;
+    }
+    return resolvedPath;
+};
+
 // Internal helper to avoid duplicating answer creation logic
 const _createAnswerLogic = async (question_id, transcript, audio_url, video_url) => {
     const existingAnswer = await Answer.findOne({ question_id });
@@ -312,32 +329,172 @@ const createAnswerForSession = async (req, res) => {
 };
 
 const uploadVideoForSession = async (req, res) => {
+    const cleanup = async () => {
+        if (req.file) {
+            await fs.unlink(req.file.path).catch(err => console.error(`Cleanup failed for ${req.file.path}:`, err));
+        }
+    };
+
     try {
-        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-            if (req.file) {
-                await fs.unlink(req.file.path).catch(err => console.error(`Cleanup failed for ${req.file.path}:`, err));
-            }
-            return res.status(400).json({ message: "Invalid session id" });
+        const { sessionId, questionId } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(sessionId) || !mongoose.Types.ObjectId.isValid(questionId)) {
+            await cleanup();
+            return res.status(400).json({ message: "Invalid session id or question id" });
         }
 
-        const isOwner = await verifySessionOwner(req.params.id, req.user.id);
-        if (!isOwner) {
-            if (req.file) {
-                await fs.unlink(req.file.path).catch(err => console.error(`Cleanup failed for ${req.file.path}:`, err));
-            }
+        const isSessionOwner = await verifySessionOwner(sessionId, req.user.id);
+        if (!isSessionOwner) {
+            await cleanup();
             return res.status(404).json({ message: "Interview session not found" });
+        }
+
+        const question = await Question.findById(questionId);
+        if (!question || String(question.session_id) !== String(sessionId)) {
+            await cleanup();
+            return res.status(404).json({ message: "Question does not belong to this session" });
+        }
+
+        const isQuestionOwner = await verifyQuestionOwner(questionId, req.user.id);
+        if (!isQuestionOwner) {
+            await cleanup();
+            return res.status(404).json({ message: "Question not found or unauthorized" });
+        }
+
+        const answer = await Answer.findOne({ question_id: questionId });
+        if (!answer) {
+            await cleanup();
+            return res.status(404).json({ message: "Answer not found for this question" });
+        }
+        const isAnswerOwner = await verifyAnswerOwner(answer._id, req.user.id);
+        if (!isAnswerOwner) {
+            await cleanup();
+            return res.status(404).json({ message: "Answer not found or unauthorized" });
         }
 
         if (!req.file) {
             return res.status(400).json({ message: "video file is required" });
         }
 
-        const video_url = `/uploads/videos/${req.file.filename}`;
-        res.status(200).json({ video_url });
-    } catch (error) {
-        if (req.file) {
-            await fs.unlink(req.file.path).catch(err => console.error(`Cleanup failed for ${req.file.path}:`, err));
+        const new_video_url = `/uploads/videos/${req.file.filename}`;
+
+        const old_video_url = answer.video_url;
+        answer.video_url = new_video_url;
+        await answer.save();
+
+        if (old_video_url) {
+            try {
+                const oldFilePath = getSafeVideoPath(old_video_url);
+                if (oldFilePath) {
+                    await fs.unlink(oldFilePath).catch(err => console.error(`Failed to delete old video ${oldFilePath}:`, err));
+                }
+            } catch (err) {
+                console.error("Error resolving old video path:", err);
+            }
         }
+
+        res.status(200).json({ video_url: new_video_url });
+    } catch (error) {
+        await cleanup();
+        res.status(500).json({ message: error.message });
+    }
+};
+
+const streamVideoForSession = async (req, res) => {
+    try {
+        const { sessionId, questionId } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(sessionId) || !mongoose.Types.ObjectId.isValid(questionId)) {
+            return res.status(400).json({ message: "Invalid session id or question id" });
+        }
+
+        const isSessionOwner = await verifySessionOwner(sessionId, req.user.id);
+        if (!isSessionOwner) {
+            return res.status(404).json({ message: "Interview session not found" });
+        }
+
+        const question = await Question.findById(questionId);
+        if (!question || String(question.session_id) !== String(sessionId)) {
+            return res.status(404).json({ message: "Question does not belong to this session" });
+        }
+
+        const isQuestionOwner = await verifyQuestionOwner(questionId, req.user.id);
+        if (!isQuestionOwner) {
+            return res.status(404).json({ message: "Question not found or unauthorized" });
+        }
+
+        const answer = await Answer.findOne({ question_id: questionId });
+        if (!answer) {
+            return res.status(404).json({ message: "Answer not found for this question" });
+        }
+
+        const isAnswerOwner = await verifyAnswerOwner(answer._id, req.user.id);
+        if (!isAnswerOwner) {
+            return res.status(404).json({ message: "Answer not found or unauthorized" });
+        }
+
+        if (!answer.video_url) {
+            return res.status(404).json({ message: "Video not found for this answer" });
+        }
+
+        const videoPath = getSafeVideoPath(answer.video_url);
+
+        if (!videoPath) {
+            return res.status(400).json({ message: "Invalid video path" });
+        }
+
+        let stat;
+        try {
+            stat = statSync(videoPath);
+        } catch (err) {
+            return res.status(404).json({ message: "Video file not found on server" });
+        }
+
+        const fileSize = stat.size;
+        const range = req.headers.range;
+
+        // Determine correct content type based on extension
+        const ext = path.extname(videoPath).toLowerCase();
+        let contentType = "video/webm";
+        if (ext === ".mp4") {
+            contentType = "video/mp4";
+        }
+
+        if (range) {
+            const parts = range.replace(/bytes=/, "").split("-");
+            let start = parseInt(parts[0], 10);
+            let end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+            // Handle suffix range (bytes=-1024) meaning last 1024 bytes
+            if (isNaN(start) && !isNaN(end)) {
+                start = fileSize - end;
+                end = fileSize - 1;
+                if (start < 0) start = 0;
+            }
+
+            if (isNaN(start) || isNaN(end) || start >= fileSize || end >= fileSize || start > end) {
+                res.status(416).header("Content-Range", `bytes */${fileSize}`).send();
+                return;
+            }
+
+            const chunksize = (end - start) + 1;
+            const fileStream = createReadStream(videoPath, { start, end });
+
+            res.writeHead(206, {
+                "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+                "Accept-Ranges": "bytes",
+                "Content-Length": chunksize,
+                "Content-Type": contentType,
+            });
+            fileStream.pipe(res);
+        } else {
+            res.writeHead(200, {
+                "Content-Length": fileSize,
+                "Content-Type": contentType,
+            });
+            createReadStream(videoPath).pipe(res);
+        }
+    } catch (error) {
         res.status(500).json({ message: error.message });
     }
 };
@@ -396,5 +553,6 @@ module.exports = {
     updateAnswerTranscript,
     createAnswerForSession,
     uploadVideoForSession,
+    streamVideoForSession,
     uploadAudioForSession
 };

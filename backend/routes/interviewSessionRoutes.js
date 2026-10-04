@@ -11,6 +11,7 @@ const {
 const {
     createAnswerForSession,
     uploadVideoForSession,
+    streamVideoForSession,
     uploadAudioForSession
 } = require("../controllers/answerController");
 
@@ -57,7 +58,7 @@ router.post("/:id/audio", (req, res, next) => {
     });
 }, uploadAudioForSession);
 
-router.post("/:id/video", (req, res, next) => {
+router.post("/:sessionId/questions/:questionId/video", (req, res, next) => {
     videoUpload.single("video")(req, res, (err) => {
         if (err) {
             return res.status(400).json({ message: err.message });
@@ -65,6 +66,8 @@ router.post("/:id/video", (req, res, next) => {
         next();
     });
 }, uploadVideoForSession);
+
+router.get("/:sessionId/questions/:questionId/video", streamVideoForSession);
 
 // Note: getFeedbackReportBySession expects req.params.sessionId based on previous setup,
 // so we'll map :sessionId in the route definition to match.
