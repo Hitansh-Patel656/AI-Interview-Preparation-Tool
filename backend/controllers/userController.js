@@ -205,6 +205,8 @@ const updateProfile = async (req, res) => {
 // ---------------------------------------------------------------------------
 // Resume
 // ---------------------------------------------------------------------------
+const { parseResume } = require("../services/resume/resumeParser");
+
 const uploadResume = async (req, res) => {
     try {
         if (!req.file) {
@@ -213,7 +215,19 @@ const uploadResume = async (req, res) => {
 
         // Fetch existing resume to know if we need to clean up an old file LATER
         const existingResume = await resumeRepository.findByUserId(req.user.id);
-        const parsedData = { skills: [], experience: [], projects: [] }; // placeholder
+
+        let parsedData = null;
+        try {
+            parsedData = await parseResume(req.file.path, req.file.originalname);
+        } catch (parseError) {
+            // Clean up newly uploaded file if parsing fails so we don't leave bad files around
+            fs.unlink(req.file.path).catch((err) => {
+                if (err.code !== "ENOENT") console.error("Failed to clean up file after parse error:", err);
+            });
+            console.error("[Resume Parse Error]:", parseError.message);
+            // Return 400 Bad Request to client, but don't leak stack traces
+            return res.status(400).json({ message: "Failed to parse resume: " + parseError.message });
+        }
 
         const resume = await resumeRepository.upsert(
             req.user.id,
