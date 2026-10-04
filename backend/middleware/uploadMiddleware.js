@@ -71,7 +71,48 @@ const videoUpload = multer({
     limits: { fileSize: 100 * 1024 * 1024 } // 100MB
 });
 
+// ---------------------------
+// Audio upload (R.2.x - Deepgram STT)
+// ---------------------------
+const AUDIO_DIR = path.join(__dirname, "..", "uploads", "audio");
+
+if (!fs.existsSync(AUDIO_DIR)) {
+    fs.mkdirSync(AUDIO_DIR, { recursive: true });
+}
+
+const audioStorage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, AUDIO_DIR),
+    filename: (req, file, cb) => {
+        const uniqueSuffix = `${req.user?.id || "anon"}-${Date.now()}`;
+        cb(null, `${uniqueSuffix}${path.extname(file.originalname)}`);
+    }
+});
+
+const audioFileFilter = (req, file, cb) => {
+    const allowedMimeTypes = ["audio/webm", "audio/mpeg", "audio/wav", "audio/mp4", "audio/ogg"];
+    const allowedExtensions = [".webm", ".mp3", ".wav", ".m4a", ".ogg"];
+
+    const ext = path.extname(file.originalname).toLowerCase();
+
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+        return cb(new Error("Only WEBM, MP3, WAV, M4A, and OGG audio files are allowed"), false);
+    }
+
+    if (!allowedExtensions.includes(ext)) {
+        return cb(new Error("Invalid audio file extension"), false);
+    }
+
+    cb(null, true);
+};
+
+const audioUpload = multer({
+    storage: audioStorage,
+    fileFilter: audioFileFilter,
+    limits: { fileSize: 20 * 1024 * 1024 } // 20MB
+});
+
 module.exports = {
     resumeUpload,
-    videoUpload
+    videoUpload,
+    audioUpload
 };

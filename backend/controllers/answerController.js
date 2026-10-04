@@ -342,6 +342,52 @@ const uploadVideoForSession = async (req, res) => {
     }
 };
 
+const { transcribeAudio } = require("../services/stt/deepgramService");
+
+const uploadAudioForSession = async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            if (req.file) {
+                await fs.unlink(req.file.path).catch(err => {});
+            }
+            return res.status(400).json({ message: "Invalid session id" });
+        }
+
+        const isOwner = await verifySessionOwner(req.params.id, req.user.id);
+        if (!isOwner) {
+            if (req.file) {
+                await fs.unlink(req.file.path).catch(err => {});
+            }
+            return res.status(404).json({ message: "Interview session not found" });
+        }
+
+        if (!req.file) {
+            return res.status(400).json({ message: "audio file is required" });
+        }
+
+        let transcript = "";
+        try {
+            transcript = await transcribeAudio(req.file.path);
+        } catch (sttError) {
+            await fs.unlink(req.file.path).catch(err => {});
+            if (sttError.message === "Empty transcript returned by Deepgram.") {
+                return res.status(400).json({ message: "Unintelligible audio or empty transcript" });
+            }
+            console.error("[Audio Upload] Transcription failed:", sttError.message);
+            return res.status(502).json({ message: "Deepgram API failure" });
+        }
+
+        const audio_url = `/uploads/audio/${req.file.filename}`;
+        res.status(200).json({ transcript, audio_url });
+    } catch (error) {
+        if (req.file) {
+            await fs.unlink(req.file.path).catch(err => {});
+        }
+        console.error("[Audio Upload] Unexpected error:", error.message);
+        res.status(500).json({ message: "Unexpected server error during audio upload" });
+    }
+};
+
 module.exports = {
     createAnswer,
     getAnswer,
@@ -349,5 +395,6 @@ module.exports = {
     getAllAnswers,
     updateAnswerTranscript,
     createAnswerForSession,
-    uploadVideoForSession
+    uploadVideoForSession,
+    uploadAudioForSession
 };
