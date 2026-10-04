@@ -17,6 +17,14 @@ const questionSchema = new mongoose.Schema(
             required: [true, "text is required"],
             trim: true
         },
+        audio_url: {
+            type: String,
+            default: null
+        },
+        tts_file_name: {
+            type: String,
+            default: null
+        },
         is_followup: {
             type: Boolean,
             default: false
