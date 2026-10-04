@@ -19,6 +19,11 @@ const {
 } = require("../controllers/questionController");
 
 const {
+    generateQuestionAudio,
+    streamQuestionAudio
+} = require("../controllers/questionAudioController");
+
+const {
     getFeedbackReportBySession
 } = require("../controllers/feedbackReportController");
 
@@ -39,6 +44,8 @@ router.post("/:id/complete", completeInterviewSession);
 
 // Nested routes
 router.get("/:id/questions", getQuestionsForSession);
+router.post("/:sessionId/questions/:questionId/audio", generateQuestionAudio);
+router.get("/:sessionId/questions/:questionId/audio", streamQuestionAudio);
 router.post("/:id/answers", createAnswerForSession);
 
 router.post("/:id/audio", (req, res, next) => {
