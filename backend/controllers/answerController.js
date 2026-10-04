@@ -5,6 +5,7 @@ const InterviewSession = require("../models/InterviewSession");
 const STARAnalysis = require("../models/STARAnalysis");
 const ContentRelevanceScore = require("../models/ContentRelevanceScore");
 const ModelAnswer = require("../models/ModelAnswer");
+const BodyLanguageAnalysis = require("../models/BodyLanguageAnalysis");
 const { verifyQuestionOwner, verifyAnswerOwner, verifySessionOwner } = require("../utils/authUtils");
 const fs = require("fs/promises");
 const { createReadStream, statSync } = require("fs");
@@ -381,6 +382,12 @@ const uploadVideoForSession = async (req, res) => {
         const old_video_url = answer.video_url;
         answer.video_url = new_video_url;
         await answer.save();
+
+        try {
+            await BodyLanguageAnalysis.deleteOne({ answer_id: answer._id });
+        } catch (err) {
+            console.error(`[Video Replacement] Failed to delete stale BodyLanguageAnalysis for answer ${answer._id}:`, err);
+        }
 
         if (old_video_url) {
             try {
