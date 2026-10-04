@@ -11,6 +11,14 @@
 const authService = require("../services/authService");
 const userRepository = require("../repositories/userRepository");
 const resumeRepository = require("../repositories/resumeRepository");
+const outcomeRepository = require("../repositories/outcomeRepository");
+const mongoose = require("mongoose");
+const InterviewSession = require("../models/InterviewSession");
+const Question = require("../models/Question");
+const Answer = require("../models/Answer");
+const ContentRelevanceScore = require("../models/ContentRelevanceScore");
+const STARAnalysis = require("../models/STARAnalysis");
+const BodyLanguageAnalysis = require("../models/BodyLanguageAnalysis");
 const fs = require("fs").promises;
 
 // ---------------------------------------------------------------------------
@@ -252,37 +260,122 @@ const getResume = async (req, res) => {
 };
 
 // ---------------------------------------------------------------------------
-// Outcomes — NOT YET MIGRATED
+// Outcomes
 // ---------------------------------------------------------------------------
-// Note: These endpoints still depend on the legacy MongoDB User model and will
-// fail (CastError) since req.user.id is a PostgreSQL UUID, not a MongoDB ObjectId.
-// This is intentionally left for the next feature branch.
 const submitOutcome = async (req, res) => {
     try {
-        res.status(501).json({ message: "Outcomes submission is temporarily disabled pending PostgreSQL migration" });
+        const { session_id, companyName, role, round, outcome, difficulty } = req.body;
+
+        if (!session_id || !mongoose.Types.ObjectId.isValid(session_id)) {
+            return res.status(400).json({ message: "Valid session_id is required" });
+        }
+
+        const session = await InterviewSession.findById(session_id);
+        if (!session) {
+            return res.status(404).json({ message: "Session not found" });
+        }
+
+        if (String(session.user_id) !== String(req.user.id)) {
+            return res.status(404).json({ message: "Session not found" });
+        }
+
+        if (session.status !== "completed") {
+            return res.status(400).json({ message: "Outcome can only be created for completed sessions" });
+        }
+
+        const validOutcomes = ['offer', 'rejected', 'in-progress', 'no-response'];
+        if (outcome && !validOutcomes.includes(outcome)) {
+            return res.status(400).json({ message: `outcome must be one of: ${validOutcomes.join(', ')}` });
+        }
+
+        const validDifficulties = ['easy', 'medium', 'hard'];
+        if (difficulty && !validDifficulties.includes(difficulty)) {
+            return res.status(400).json({ message: `difficulty must be one of: ${validDifficulties.join(', ')}` });
+        }
+
+        // Aggregate scores
+        const questions = await Question.find({ session_id });
+        const questionIds = questions.map(q => q._id);
+        const answers = await Answer.find({ question_id: { $in: questionIds } });
+        const answerIds = answers.map(a => a._id);
+
+        let crTotal = 0, crCount = 0;
+        let starTotal = 0, starCount = 0;
+        let blTotal = 0, blCount = 0;
+
+        if (answerIds.length > 0) {
+            const crScores = await ContentRelevanceScore.find({ answer_id: { $in: answerIds } });
+            crScores.forEach(s => { crTotal += s.score; crCount++; });
+
+            const starScores = await STARAnalysis.find({ answer_id: { $in: answerIds } });
+            starScores.forEach(s => { starTotal += s.star_compliance_rating; starCount++; });
+
+            const blScores = await BodyLanguageAnalysis.find({ answer_id: { $in: answerIds } });
+            blScores.forEach(s => { blTotal += s.overall_body_language_score; blCount++; });
+        }
+
+        const crAvg = crCount > 0 ? Math.round(crTotal / crCount) : null;
+        const starAvg = starCount > 0 ? Math.round(starTotal / starCount) : null;
+        const blAvg = blCount > 0 ? Math.round(blTotal / blCount) : null;
+
+        let overallTotal = 0, overallCount = 0;
+        if (crAvg !== null) { overallTotal += crAvg; overallCount++; }
+        if (starAvg !== null) { overallTotal += starAvg; overallCount++; }
+        if (blAvg !== null) { overallTotal += blAvg; overallCount++; }
+
+        const overall_score = overallCount > 0 ? Math.round(overallTotal / overallCount) : 0;
+
+        const outcomeData = {
+            session_id,
+            role: session.role,
+            interview_type: session.interview_type,
+            overall_score,
+            content_relevance_score: crAvg,
+            star_compliance_score: starAvg,
+            body_language_score: blAvg,
+            company_name: companyName,
+            round,
+            real_world_outcome: outcome,
+            difficulty,
+            completed_at: session.ended_at || new Date()
+        };
+
+        const result = await outcomeRepository.create(req.user.id, outcomeData);
+        res.status(201).json(result);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        if (error.code === '23505') {
+            return res.status(409).json({ message: "Outcome already exists for this session" });
+        }
+        res.status(500).json({ message: "Failed to submit outcome" });
     }
 };
 
 const getOutcomes = async (req, res) => {
     try {
-        res.status(501).json({ message: "Outcomes retrieval is temporarily disabled pending PostgreSQL migration" });
+        const outcomes = await outcomeRepository.findAllByUserId(req.user.id);
+        res.status(200).json(outcomes);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ message: "Failed to fetch outcomes" });
     }
 };
 
 // ---------------------------------------------------------------------------
-// Progress Dashboard — NOT YET MIGRATED
+// Progress Dashboard
 // ---------------------------------------------------------------------------
 const getProgress = async (req, res) => {
     try {
-        // const progress = await SessionModel.find({ userId: req.user.id });
-        const progress = []; // placeholder
-        res.json({ sessions: progress });
+        const progress = await outcomeRepository.getProgressByUserId(req.user.id);
+        res.json({
+            stats: {
+                total_interviews: parseInt(progress.stats.total_interviews, 10),
+                average_score: Math.round(parseFloat(progress.stats.average_score)),
+                best_score: parseInt(progress.stats.best_score, 10),
+                latest_score: parseInt(progress.stats.latest_score || 0, 10)
+            },
+            sessions: progress.history
+        });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ message: "Failed to fetch progress" });
     }
 };
 
