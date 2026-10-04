@@ -28,6 +28,11 @@ const {
     getFeedbackReportBySession
 } = require("../controllers/feedbackReportController");
 
+const {
+    analyzeVideoForSession,
+    getVideoAnalysisForSession
+} = require("../controllers/videoAnalysisController");
+
 const { videoUpload, audioUpload } = require("../middleware/uploadMiddleware");
 
 const authMiddleware = require("../middleware/authMiddleware");
@@ -68,6 +73,9 @@ router.post("/:sessionId/questions/:questionId/video", (req, res, next) => {
 }, uploadVideoForSession);
 
 router.get("/:sessionId/questions/:questionId/video", streamVideoForSession);
+
+router.post("/:sessionId/questions/:questionId/video/analyze", analyzeVideoForSession);
+router.get("/:sessionId/questions/:questionId/video/analysis", getVideoAnalysisForSession);
 
 // Note: getFeedbackReportBySession expects req.params.sessionId based on previous setup,
 // so we'll map :sessionId in the route definition to match.
