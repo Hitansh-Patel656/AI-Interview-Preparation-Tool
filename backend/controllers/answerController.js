@@ -13,8 +13,10 @@ const path = require("path");
 const jobDescriptionRepository = require("../repositories/jobDescriptionRepository");
 const resumeRepository = require("../repositories/resumeRepository");
 const { evaluateAnswer } = require("../services/llm/answerEvaluator");
+const { evaluateDelivery } = require("../services/delivery/deliveryEvaluator");
 const { generateFollowUpQuestion } = require("../services/llm/followUpGenerator");
 const { createQuestionForSession: persistQuestion } = require("./questionController");
+const DeliveryMetrics = require("../models/DeliveryMetrics");
 
 // Robust directory containment check for video files
 const getSafeVideoPath = (videoUrl) => {
@@ -196,7 +198,7 @@ const createAnswerForSession = async (req, res) => {
             return res.status(404).json({ message: "Interview session not found" });
         }
 
-        const { question_id, transcript, audio_url, video_url } = req.body;
+        const { question_id, transcript, audio_url, video_url, duration_seconds } = req.body;
 
         if (!question_id) {
             return res.status(400).json({ message: "question_id is required" });
@@ -269,6 +271,22 @@ const createAnswerForSession = async (req, res) => {
                 { upsert: true, new: true, runValidators: true }
             );
 
+            // Calculate delivery metrics deterministically and with AI (tone)
+            const deliveryMetricsResult = await evaluateDelivery({
+                transcript: transcript,
+                duration_seconds: duration_seconds || 0
+            });
+
+            await DeliveryMetrics.findOneAndUpdate(
+                { answer_id: answer._id },
+                {
+                    pace_wpm: deliveryMetricsResult.pace_wpm,
+                    filler_word_count: deliveryMetricsResult.filler_word_count,
+                    tone: deliveryMetricsResult.tone
+                },
+                { upsert: true, new: true, runValidators: true }
+            );
+
             // Follow-up generation
             if (evaluationResult.follow_up_required) {
                 const existingFollowUp = await Question.findOne({ parent_question_id: question._id });
@@ -307,7 +325,8 @@ const createAnswerForSession = async (req, res) => {
                     },
                     model_answer: {
                         generated_text: evaluationResult.model_answer
-                    }
+                    },
+                    delivery: deliveryMetricsResult
                 },
                 next_question: nextQuestion
             });
@@ -530,8 +549,11 @@ const uploadAudioForSession = async (req, res) => {
         }
 
         let transcript = "";
+        let duration = 0;
         try {
-            transcript = await transcribeAudio(req.file.path);
+            const sttResult = await transcribeAudio(req.file.path);
+            transcript = sttResult.transcript;
+            duration = sttResult.duration;
         } catch (sttError) {
             await fs.unlink(req.file.path).catch(err => {});
             if (sttError.message === "Empty transcript returned by Deepgram.") {
@@ -542,7 +564,7 @@ const uploadAudioForSession = async (req, res) => {
         }
 
         const audio_url = `/uploads/audio/${req.file.filename}`;
-        res.status(200).json({ transcript, audio_url });
+        res.status(200).json({ transcript, audio_url, duration_seconds: duration });
     } catch (error) {
         if (req.file) {
             await fs.unlink(req.file.path).catch(err => {});

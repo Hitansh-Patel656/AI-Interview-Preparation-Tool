@@ -18,7 +18,7 @@ const getClient = () => {
 /**
  * Transcribes audio from a local file path using Deepgram STT.
  * @param {string} filePath - Absolute path to the local audio file.
- * @returns {Promise<string>} The transcript string.
+ * @returns {Promise<{transcript: string, duration: number}>} The transcript and audio duration.
  */
 const transcribeAudio = async (filePath) => {
     const client = getClient();
@@ -47,7 +47,9 @@ const transcribeAudio = async (filePath) => {
             throw new Error("Empty transcript returned by Deepgram.");
         }
 
-        return transcript.trim();
+        const duration = response?.metadata?.duration || 0;
+
+        return { transcript: transcript.trim(), duration };
     } catch (error) {
         // Distinguish errors
         if (error.message.includes("DEEPGRAM_API_KEY is not configured")) {
