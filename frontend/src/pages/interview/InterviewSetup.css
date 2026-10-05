@@ -1,0 +1,344 @@
+.setup-container {
+  max-width: 720px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* Header */
+.setup-header {
+  margin-bottom: 2rem;
+}
+
+.setup-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  margin-bottom: 1rem;
+  transition: color var(--transition-normal);
+}
+
+.setup-back:hover {
+  color: var(--text-primary);
+}
+
+.setup-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 0.25rem 0;
+}
+
+.setup-subtitle {
+  color: var(--text-secondary);
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+/* Form sections */
+.setup-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.setup-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.setup-section-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Resume status */
+.resume-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-card);
+}
+
+.resume-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.resume-icon.has-resume {
+  background-color: #ECFDF5;
+  color: var(--color-success);
+}
+
+.resume-icon.no-resume {
+  background-color: #FEF3C7;
+  color: var(--color-warning);
+}
+
+.resume-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.resume-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin: 0 0 0.125rem 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resume-detail {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.resume-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+/* Job description selector */
+.jd-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.jd-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-card);
+  cursor: pointer;
+  transition: border-color var(--transition-normal);
+}
+
+.jd-option:hover {
+  border-color: var(--accent-color);
+}
+
+.jd-option.selected {
+  border-color: var(--accent-color);
+  background-color: #f0f5ff;
+}
+
+.jd-option input[type="radio"] {
+  margin-top: 0.1875rem;
+  accent-color: var(--accent-color);
+  flex-shrink: 0;
+}
+
+.jd-option-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.jd-option-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.jd-option-text {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  margin: 0.25rem 0 0 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.jd-none-label {
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+
+.jd-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.jd-empty {
+  padding: 1rem;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.jd-inline-form {
+  margin-top: 0.5rem;
+}
+
+.jd-textarea {
+  display: block;
+  width: 100%;
+  min-height: 100px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background-color: transparent;
+  padding: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  transition: border-color var(--transition-normal);
+}
+
+.jd-textarea:focus-visible {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 1px var(--accent-color);
+}
+
+.jd-textarea-error {
+  border-color: var(--color-error);
+}
+
+.jd-textarea-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+/* Interview type selector */
+.type-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+
+@media (max-width: 480px) {
+  .type-options {
+    grid-template-columns: 1fr;
+  }
+}
+
+.type-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-card);
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  text-align: center;
+}
+
+.type-option:hover {
+  border-color: var(--accent-color);
+}
+
+.type-option.selected {
+  border-color: var(--accent-color);
+  background-color: #f0f5ff;
+}
+
+.type-option-icon {
+  color: var(--text-secondary);
+}
+
+.type-option.selected .type-option-icon {
+  color: var(--accent-color);
+}
+
+.type-option-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* Field error */
+.field-error {
+  font-size: 0.75rem;
+  color: var(--color-error);
+  margin-top: 0.25rem;
+}
+
+/* Divider */
+.setup-divider {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 0.5rem 0;
+}
+
+/* Footer */
+.setup-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-top: 0.5rem;
+}
+
+.setup-footer .btn {
+  width: 100%;
+}
+
+@media (min-width: 480px) {
+  .setup-footer {
+    flex-direction: row-reverse;
+    justify-content: flex-start;
+  }
+
+  .setup-footer .btn {
+    width: auto;
+  }
+}
+
+/* API error banner */
+.setup-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid #FECACA;
+  border-radius: var(--radius-md);
+  background-color: #FEF2F2;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+.setup-error-banner svg {
+  flex-shrink: 0;
+  color: var(--color-error);
+}

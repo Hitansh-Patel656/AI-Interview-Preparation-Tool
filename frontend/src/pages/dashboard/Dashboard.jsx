@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { Button } from '../../components/ui/Button';
@@ -9,12 +10,13 @@ import { Play, AlertCircle, Loader2, Target } from 'lucide-react';
 import './Dashboard.css';
 
 export const Dashboard = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [data, setData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const fetchProgress = React.useCallback(async () => {
+  const fetchProgress = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
@@ -42,7 +44,7 @@ export const Dashboard = () => {
           <h1 className="dashboard-title">Welcome back, {user?.name}</h1>
           <p className="dashboard-subtitle">Track your performance and prepare for your next role.</p>
         </div>
-        <Button className="start-btn" disabled>
+        <Button className="start-btn" onClick={() => navigate('/interview/setup')}>
           <Play size={16} />
           <span>New Interview</span>
         </Button>
@@ -67,7 +69,7 @@ export const Dashboard = () => {
           </div>
           <h2>No Interviews Yet</h2>
           <p>Complete your first interview to see your performance metrics and trends here.</p>
-          <Button className="empty-action" disabled>
+          <Button className="empty-action" onClick={() => navigate('/interview/setup')}>
             Start First Interview
           </Button>
         </div>
