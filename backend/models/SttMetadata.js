@@ -10,6 +10,10 @@ const sttMetadataSchema = new mongoose.Schema(
         duration_seconds: {
             type: Number,
             required: true
+        },
+        user_id: {
+            type: String,
+            required: true
         }
     },
     { timestamps: true }

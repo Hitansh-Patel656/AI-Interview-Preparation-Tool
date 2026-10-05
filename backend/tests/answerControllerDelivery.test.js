@@ -31,7 +31,7 @@ llmService.generateStructured = async () => ({
 
 async function runTests() {
     console.log("Running Answer Controller Delivery Tests...");
-    
+
     const uri = "mongodb://127.0.0.1:27017/ai_interview_test_answer_ctrl";
     await mongoose.connect(uri);
 
@@ -65,11 +65,11 @@ async function runTests() {
         status: "in_progress"
     });
 
-    const createReqRes = (body) => {
+    const createReqRes = (body, specificUserId = userId) => {
         const req = {
             method: "POST",
             params: { id: session._id.toString() },
-            user: { id: userId },
+            user: { id: specificUserId },
             body
         };
         let statusCode = null;
@@ -81,14 +81,34 @@ async function runTests() {
         return { req, res, getStatus: () => statusCode, getData: () => responseData };
     };
 
-    await runTest("9 & 10. Client duration cannot override server duration & pace uses authoritative", async () => {
+    await runTest("valid authoritative duration -> correct Answer.duration_seconds and WPM", async () => {
         const question = await Question.create({ session_id: session._id, text: "Q1" });
-        const audioUrl = `/uploads/audio/server-auth-${Date.now()}.webm`;
-        
-        // 1. Setup authoritative server-side duration in SttMetadata (e.g. 10 seconds)
-        await SttMetadata.create({ audio_url: audioUrl, duration_seconds: 10 });
+        const audioUrl = `/uploads/audio/valid-${Date.now()}.webm`;
 
-        // 2. Client sends malicious duration (e.g. 0.0001)
+        await SttMetadata.create({ audio_url: audioUrl, duration_seconds: 10, user_id: userId });
+
+        const { req, res, getStatus, getData } = createReqRes({
+            question_id: question._id.toString(),
+            transcript: "test transcript with four words",
+            audio_url: audioUrl
+        });
+
+        await createAnswerForSession(req, res);
+        assert.strictEqual(getStatus(), 201);
+
+        const answer = await Answer.findById(getData().answer.id);
+        assert.strictEqual(answer.duration_seconds, 10);
+
+        const delivery = await DeliveryMetrics.findOne({ answer_id: answer._id });
+        assert.strictEqual(delivery.pace_wpm, 30); // (5 / 10) * 60
+    });
+
+    await runTest("client sends 0.0001 while authoritative duration is 10 -> stored/used duration remains 10", async () => {
+        const question = await Question.create({ session_id: session._id, text: "Q2" });
+        const audioUrl = `/uploads/audio/malicious-small-${Date.now()}.webm`;
+
+        await SttMetadata.create({ audio_url: audioUrl, duration_seconds: 10, user_id: userId });
+
         const { req, res, getStatus, getData } = createReqRes({
             question_id: question._id.toString(),
             transcript: "test transcript with four words",
@@ -98,47 +118,114 @@ async function runTests() {
 
         await createAnswerForSession(req, res);
         assert.strictEqual(getStatus(), 201);
-        
-        const answerId = getData().answer.id;
-        const answer = await Answer.findById(answerId);
-        
-        // Duration MUST be 10 (server auth), not 0.0001
+        const answer = await Answer.findById(getData().answer.id);
         assert.strictEqual(answer.duration_seconds, 10);
-        
-        const delivery = await DeliveryMetrics.findOne({ answer_id: answer._id });
-        // Pace should be: (5 words / 10s) * 60 = 30 wpm. (If duration was 0.0001, pace would be 3000000)
-        assert.strictEqual(delivery.pace_wpm, 30);
     });
 
-    await runTest("Client untrusted duration is validated strictly if server duration is missing", async () => {
-        const question = await Question.create({ session_id: session._id, text: "Q2" });
-        const audioUrl = `/uploads/audio/client-only-${Date.now()}.webm`;
-        
-        // No server duration setup.
-        
-        // Client sends malicious duration
+    await runTest("client sends 7200 while authoritative duration is 10 -> stored/used duration remains 10", async () => {
+        const question = await Question.create({ session_id: session._id, text: "Q3" });
+        const audioUrl = `/uploads/audio/malicious-large-${Date.now()}.webm`;
+
+        await SttMetadata.create({ audio_url: audioUrl, duration_seconds: 10, user_id: userId });
+
         const { req, res, getStatus, getData } = createReqRes({
             question_id: question._id.toString(),
-            transcript: "test transcript",
+            transcript: "test transcript with four words",
             audio_url: audioUrl,
-            duration_seconds: -5
+            duration_seconds: 7200
         });
 
         await createAnswerForSession(req, res);
         assert.strictEqual(getStatus(), 201);
-        
         const answer = await Answer.findById(getData().answer.id);
-        
-        // -5 is invalid, so it falls back to 0.
-        assert.strictEqual(answer.duration_seconds, 0);
-        
-        const delivery = await DeliveryMetrics.findOne({ answer_id: answer._id });
-        // Pace should be 0, not negative
-        assert.strictEqual(delivery.pace_wpm, 0);
+        assert.strictEqual(answer.duration_seconds, 10);
+    });
+
+    await runTest("client sends NaN/Infinity/string -> cannot influence authoritative duration", async () => {
+        const question = await Question.create({ session_id: session._id, text: "Q4" });
+        const audioUrl = `/uploads/audio/malicious-nan-${Date.now()}.webm`;
+
+        await SttMetadata.create({ audio_url: audioUrl, duration_seconds: 10, user_id: userId });
+
+        const { req, res, getStatus, getData } = createReqRes({
+            question_id: question._id.toString(),
+            transcript: "test transcript with four words",
+            audio_url: audioUrl,
+            duration_seconds: "invalid"
+        });
+
+        await createAnswerForSession(req, res);
+        assert.strictEqual(getStatus(), 201);
+        const answer = await Answer.findById(getData().answer.id);
+        assert.strictEqual(answer.duration_seconds, 10);
+    });
+
+    await runTest("SttMetadata missing + malicious client duration 0.0001 -> request fails (400)", async () => {
+        const question = await Question.create({ session_id: session._id, text: "Q5" });
+        const audioUrl = `/uploads/audio/missing-small-${Date.now()}.webm`;
+
+        const { req, res, getStatus } = createReqRes({
+            question_id: question._id.toString(),
+            transcript: "test transcript",
+            audio_url: audioUrl,
+            duration_seconds: 0.0001
+        });
+
+        await createAnswerForSession(req, res);
+        assert.strictEqual(getStatus(), 400);
+    });
+
+    await runTest("SttMetadata missing + malicious client duration 7200 -> request fails (400)", async () => {
+        const question = await Question.create({ session_id: session._id, text: "Q6" });
+        const audioUrl = `/uploads/audio/missing-large-${Date.now()}.webm`;
+
+        const { req, res, getStatus } = createReqRes({
+            question_id: question._id.toString(),
+            transcript: "test transcript",
+            audio_url: audioUrl,
+            duration_seconds: 7200
+        });
+
+        await createAnswerForSession(req, res);
+        assert.strictEqual(getStatus(), 400);
+    });
+
+    await runTest("no authoritative duration -> request follows the defined controlled failure path", async () => {
+        const question = await Question.create({ session_id: session._id, text: "Q7" });
+        const audioUrl = `/uploads/audio/missing-none-${Date.now()}.webm`;
+
+        const { req, res, getStatus, getData } = createReqRes({
+            question_id: question._id.toString(),
+            transcript: "test transcript",
+            audio_url: audioUrl
+        });
+
+        await createAnswerForSession(req, res);
+        assert.strictEqual(getStatus(), 400);
+        assert.strictEqual(getData().message, "Authoritative STT metadata is unavailable or unauthorized for this audio submission.");
+    });
+
+    await runTest("cross-user audio_url/SttMetadata access is rejected", async () => {
+        const question = await Question.create({ session_id: session._id, text: "Q8" });
+        const audioUrl = `/uploads/audio/cross-user-${Date.now()}.webm`;
+
+        // Another user created the SttMetadata
+        await SttMetadata.create({ audio_url: audioUrl, duration_seconds: 10, user_id: "other-user-id" });
+
+        // Our test user tries to claim it
+        const { req, res, getStatus, getData } = createReqRes({
+            question_id: question._id.toString(),
+            transcript: "test transcript",
+            audio_url: audioUrl
+        });
+
+        await createAnswerForSession(req, res);
+        assert.strictEqual(getStatus(), 400);
+        assert.strictEqual(getData().message, "Authoritative STT metadata is unavailable or unauthorized for this audio submission.");
     });
 
     console.log(`\nTests completed: ${testsPassed} passed, ${testsFailed} failed`);
-    
+
     await mongoose.connection.dropDatabase();
     await mongoose.connection.close();
 

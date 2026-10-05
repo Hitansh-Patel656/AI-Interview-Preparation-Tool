@@ -225,17 +225,11 @@ const createAnswerForSession = async (req, res) => {
         // Fetch authoritative duration from SttMetadata if audio_url exists
         let authoritativeDuration = 0;
         if (audio_url) {
-            const sttMeta = await SttMetadata.findOne({ audio_url });
-            if (sttMeta && Number.isFinite(sttMeta.duration_seconds) && sttMeta.duration_seconds > 0) {
-                authoritativeDuration = sttMeta.duration_seconds;
+            const sttMeta = await SttMetadata.findOne({ audio_url, user_id: req.user.id });
+            if (!sttMeta || !Number.isFinite(sttMeta.duration_seconds) || sttMeta.duration_seconds <= 0) {
+                return res.status(400).json({ message: "Authoritative STT metadata is unavailable or unauthorized for this audio submission." });
             }
-        }
-        // If we didn't find server-side duration but client provided one, treat as untrusted fallback with strict validation
-        if (authoritativeDuration === 0 && clientDuration !== undefined) {
-            const parsedClientDuration = Number(clientDuration);
-            if (Number.isFinite(parsedClientDuration) && parsedClientDuration > 0 && parsedClientDuration <= 7200) {
-                authoritativeDuration = parsedClientDuration;
-            }
+            authoritativeDuration = sttMeta.duration_seconds;
         }
 
         // Ownership of question is transitively proven by owning the session it belongs to
@@ -586,7 +580,7 @@ const uploadAudioForSession = async (req, res) => {
         if (duration > 0) {
             await SttMetadata.findOneAndUpdate(
                 { audio_url },
-                { duration_seconds: duration },
+                { duration_seconds: duration, user_id: req.user.id },
                 { upsert: true, new: true, runValidators: true }
             );
         }
