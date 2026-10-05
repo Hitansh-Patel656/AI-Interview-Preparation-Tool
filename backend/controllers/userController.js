@@ -19,6 +19,7 @@ const Answer = require("../models/Answer");
 const ContentRelevanceScore = require("../models/ContentRelevanceScore");
 const STARAnalysis = require("../models/STARAnalysis");
 const BodyLanguageAnalysis = require("../models/BodyLanguageAnalysis");
+const DeliveryMetrics = require("../models/DeliveryMetrics");
 const fs = require("fs").promises;
 
 // ---------------------------------------------------------------------------
@@ -385,6 +386,92 @@ const getOutcomes = async (req, res) => {
 const getProgress = async (req, res) => {
     try {
         const progress = await outcomeRepository.getProgressByUserId(req.user.id);
+
+        const pace_trend = [];
+        const filler_trend = [];
+        const star_trend = [];
+        const content_trend = [];
+
+        if (progress.history && progress.history.length > 0) {
+            const sessionIds = progress.history.map(s => s.session_id);
+
+            // Batch fetch Mongo data
+            const questions = await Question.find({ session_id: { $in: sessionIds } });
+
+            // Group questions by session_id
+            const sessionQuestions = {};
+            questions.forEach(q => {
+                const sid = String(q.session_id);
+                if (!sessionQuestions[sid]) sessionQuestions[sid] = [];
+                sessionQuestions[sid].push(q._id);
+            });
+
+            const questionIds = questions.map(q => q._id);
+            const answers = await Answer.find({ question_id: { $in: questionIds } });
+
+            // Group answers by question_id
+            const questionAnswers = {};
+            answers.forEach(a => {
+                const qid = String(a.question_id);
+                questionAnswers[qid] = a._id;
+            });
+
+            const answerIds = answers.map(a => a._id);
+            const deliveryMetricsList = await DeliveryMetrics.find({ answer_id: { $in: answerIds } });
+
+            // Map delivery metrics by answer_id
+            const deliveryMap = {};
+            deliveryMetricsList.forEach(dm => {
+                deliveryMap[String(dm.answer_id)] = dm;
+            });
+
+            // Reconstruct trends session by session to preserve chronology
+            progress.history.forEach(session => {
+                const sid = String(session.session_id);
+                const date = session.completed_at;
+
+                // Push postgres trends
+                if (session.star_compliance_score !== null) {
+                    star_trend.push({ session_id: sid, date, value: session.star_compliance_score });
+                }
+                if (session.content_relevance_score !== null) {
+                    content_trend.push({ session_id: sid, date, value: session.content_relevance_score });
+                }
+
+                // Aggregate Delivery Metrics for this session
+                const qIds = sessionQuestions[sid] || [];
+                let sessionPaceTotal = 0;
+                let sessionPaceCount = 0;
+                let sessionFillerTotal = 0;
+                let sessionFillerCount = 0;
+
+                qIds.forEach(qid => {
+                    const ansId = questionAnswers[String(qid)];
+                    if (ansId && deliveryMap[String(ansId)]) {
+                        const dm = deliveryMap[String(ansId)];
+                        if (dm.pace_wpm > 0) { // Only average valid pace
+                            sessionPaceTotal += dm.pace_wpm;
+                            sessionPaceCount++;
+                        }
+                        if (dm.filler_word_count !== null && dm.filler_word_count !== undefined) {
+                            sessionFillerTotal += dm.filler_word_count;
+                            sessionFillerCount++;
+                        }
+                    }
+                });
+
+                if (sessionPaceCount > 0) {
+                    pace_trend.push({ session_id: sid, date, value: Math.round(sessionPaceTotal / sessionPaceCount) });
+                }
+
+                // For filler words, we sum the filler words of all answers in the session,
+                // but only if there was at least one answer evaluated for fillers.
+                if (sessionFillerCount > 0) {
+                    filler_trend.push({ session_id: sid, date, value: sessionFillerTotal });
+                }
+            });
+        }
+
         res.json({
             stats: {
                 total_interviews: parseInt(progress.stats.total_interviews, 10),
@@ -392,7 +479,11 @@ const getProgress = async (req, res) => {
                 best_score: parseInt(progress.stats.best_score, 10),
                 latest_score: parseInt(progress.stats.latest_score || 0, 10)
             },
-            sessions: progress.history
+            sessions: progress.history,
+            pace_trend,
+            filler_trend,
+            star_trend,
+            content_trend
         });
     } catch (error) {
         res.status(500).json({ message: "Failed to fetch progress" });
