@@ -54,7 +54,7 @@ const getProgressByUserId = async (userId) => {
     `;
     
     const historyQuery = `
-        SELECT session_id, role, interview_type, overall_score, completed_at
+        SELECT session_id, role, interview_type, overall_score, content_relevance_score, star_compliance_score, completed_at
         FROM outcomes
         WHERE user_id = $1
         ORDER BY completed_at ASC
