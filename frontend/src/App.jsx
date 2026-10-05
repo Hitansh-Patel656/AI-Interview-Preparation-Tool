@@ -8,6 +8,7 @@ import { Login } from './pages/auth/Login';
 import { Register } from './pages/auth/Register';
 import { Dashboard } from './pages/dashboard/Dashboard';
 import { InterviewSetup } from './pages/interview/InterviewSetup';
+import { InterviewRoom } from './pages/interview/InterviewRoom';
 
 const NotFound = () => (
   <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
@@ -37,6 +38,7 @@ function App() {
             <Route element={<DashboardLayout />}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/interview/setup" element={<InterviewSetup />} />
+              <Route path="/interview/:id" element={<InterviewRoom />} />
               {/* Future protected routes will go here */}
             </Route>
           </Route>
