@@ -22,6 +22,11 @@ const deliveryMetricsSchema = new mongoose.Schema(
             type: String,
             required: [true, "tone is required"],
             trim: true
+        },
+        tone_analysis_status: {
+            type: String,
+            enum: ["success", "fallback"],
+            default: "success"
         }
     },
     { timestamps: true }

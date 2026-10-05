@@ -17,6 +17,7 @@ const { evaluateDelivery } = require("../services/delivery/deliveryEvaluator");
 const { generateFollowUpQuestion } = require("../services/llm/followUpGenerator");
 const { createQuestionForSession: persistQuestion } = require("./questionController");
 const DeliveryMetrics = require("../models/DeliveryMetrics");
+const SttMetadata = require("../models/SttMetadata");
 
 // Robust directory containment check for video files
 const getSafeVideoPath = (videoUrl) => {
@@ -33,12 +34,12 @@ const getSafeVideoPath = (videoUrl) => {
 };
 
 // Internal helper to avoid duplicating answer creation logic
-const _createAnswerLogic = async (question_id, transcript, audio_url, video_url) => {
+const _createAnswerLogic = async (question_id, transcript, audio_url, video_url, duration_seconds = 0) => {
     const existingAnswer = await Answer.findOne({ question_id });
     if (existingAnswer) {
         throw { status: 409, message: "An answer already exists for this question" };
     }
-    return await Answer.create({ question_id, transcript, audio_url, video_url });
+    return await Answer.create({ question_id, transcript, audio_url, video_url, duration_seconds });
 };
 
 const createAnswer = async (req, res) => {
@@ -198,7 +199,7 @@ const createAnswerForSession = async (req, res) => {
             return res.status(404).json({ message: "Interview session not found" });
         }
 
-        const { question_id, transcript, audio_url, video_url, duration_seconds } = req.body;
+        const { question_id, transcript, audio_url, video_url, duration_seconds: clientDuration } = req.body;
 
         if (!question_id) {
             return res.status(400).json({ message: "question_id is required" });
@@ -221,8 +222,24 @@ const createAnswerForSession = async (req, res) => {
             return res.status(404).json({ message: "Question does not belong to this session" });
         }
 
+        // Fetch authoritative duration from SttMetadata if audio_url exists
+        let authoritativeDuration = 0;
+        if (audio_url) {
+            const sttMeta = await SttMetadata.findOne({ audio_url });
+            if (sttMeta && Number.isFinite(sttMeta.duration_seconds) && sttMeta.duration_seconds > 0) {
+                authoritativeDuration = sttMeta.duration_seconds;
+            }
+        }
+        // If we didn't find server-side duration but client provided one, treat as untrusted fallback with strict validation
+        if (authoritativeDuration === 0 && clientDuration !== undefined) {
+            const parsedClientDuration = Number(clientDuration);
+            if (Number.isFinite(parsedClientDuration) && parsedClientDuration > 0 && parsedClientDuration <= 7200) {
+                authoritativeDuration = parsedClientDuration;
+            }
+        }
+
         // Ownership of question is transitively proven by owning the session it belongs to
-        const answer = await _createAnswerLogic(question_id, transcript, audio_url, video_url);
+        const answer = await _createAnswerLogic(question_id, transcript, audio_url, video_url, authoritativeDuration);
 
         let evaluationResult;
         let generatedFollowUp = null;
@@ -274,7 +291,7 @@ const createAnswerForSession = async (req, res) => {
             // Calculate delivery metrics deterministically and with AI (tone)
             const deliveryMetricsResult = await evaluateDelivery({
                 transcript: transcript,
-                duration_seconds: duration_seconds || 0
+                duration_seconds: answer.duration_seconds
             });
 
             await DeliveryMetrics.findOneAndUpdate(
@@ -282,7 +299,8 @@ const createAnswerForSession = async (req, res) => {
                 {
                     pace_wpm: deliveryMetricsResult.pace_wpm,
                     filler_word_count: deliveryMetricsResult.filler_word_count,
-                    tone: deliveryMetricsResult.tone
+                    tone: deliveryMetricsResult.tone,
+                    tone_analysis_status: deliveryMetricsResult.tone_analysis_status
                 },
                 { upsert: true, new: true, runValidators: true }
             );
@@ -564,6 +582,15 @@ const uploadAudioForSession = async (req, res) => {
         }
 
         const audio_url = `/uploads/audio/${req.file.filename}`;
+        // Persist authoritative duration server-side
+        if (duration > 0) {
+            await SttMetadata.findOneAndUpdate(
+                { audio_url },
+                { duration_seconds: duration },
+                { upsert: true, new: true, runValidators: true }
+            );
+        }
+
         res.status(200).json({ transcript, audio_url, duration_seconds: duration });
     } catch (error) {
         if (req.file) {

@@ -135,7 +135,7 @@ const getFeedbackReportBySession = async (req, res) => {
                         content_relevance: cr ? { score: cr.score, notes: cr.notes } : null,
                         star_analysis: star ? { star_compliance_rating: star.star_compliance_rating, suggestions: star.suggestions } : null,
                         model_answer: model ? { generated_text: model.generated_text } : null,
-                        delivery: delivery ? { pace_wpm: delivery.pace_wpm, filler_word_count: delivery.filler_word_count, tone: delivery.tone } : null
+                        delivery: delivery ? { pace_wpm: delivery.pace_wpm, filler_word_count: delivery.filler_word_count, tone: delivery.tone, tone_analysis_status: delivery.tone_analysis_status } : null
                     };
                 }
 
