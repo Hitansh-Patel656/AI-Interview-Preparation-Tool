@@ -20,6 +20,10 @@ const answerSchema = new mongoose.Schema(
         video_url: {
             type: String,
             default: null // only present if optional video capture (R.2.4) was enabled
+        },
+        duration_seconds: {
+            type: Number,
+            default: 0
         }
     },
     { timestamps: true }

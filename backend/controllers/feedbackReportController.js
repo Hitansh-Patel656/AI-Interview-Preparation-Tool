@@ -7,6 +7,7 @@ const ContentRelevanceScore = require("../models/ContentRelevanceScore");
 const STARAnalysis = require("../models/STARAnalysis");
 const ModelAnswer = require("../models/ModelAnswer");
 const BodyLanguageAnalysis = require("../models/BodyLanguageAnalysis");
+const DeliveryMetrics = require("../models/DeliveryMetrics");
 const { verifySessionOwner } = require("../utils/authUtils");
 
 const createFeedbackReport = async (req, res) => {
@@ -99,11 +100,12 @@ const getFeedbackReportBySession = async (req, res) => {
         const answerIds = answers.map(a => a._id);
 
         // Batch fetch analyses to avoid N+1
-        const [crScores, starScores, modelAnswers, bodyLanguageScores] = await Promise.all([
+        const [crScores, starScores, modelAnswers, bodyLanguageScores, deliveryMetrics] = await Promise.all([
             ContentRelevanceScore.find({ answer_id: { $in: answerIds } }).lean(),
             STARAnalysis.find({ answer_id: { $in: answerIds } }).lean(),
             ModelAnswer.find({ question_id: { $in: questionIds } }).lean(),
-            BodyLanguageAnalysis.find({ answer_id: { $in: answerIds } }).lean()
+            BodyLanguageAnalysis.find({ answer_id: { $in: answerIds } }).lean(),
+            DeliveryMetrics.find({ answer_id: { $in: answerIds } }).lean()
         ]);
 
         // Build memory lookup maps
@@ -112,6 +114,7 @@ const getFeedbackReportBySession = async (req, res) => {
         const starMap = new Map(starScores.map(s => [s.answer_id.toString(), s]));
         const modelMap = new Map(modelAnswers.map(m => [m.question_id.toString(), m]));
         const blMap = new Map(bodyLanguageScores.map(b => [b.answer_id.toString(), b]));
+        const deliveryMap = new Map(deliveryMetrics.map(d => [d.answer_id.toString(), d]));
 
         // Construct final questions array
         const aggregatedQuestions = questions.map(q => {
@@ -125,12 +128,14 @@ const getFeedbackReportBySession = async (req, res) => {
                 const cr = crMap.get(answer._id.toString());
                 const star = starMap.get(answer._id.toString());
                 const bl = blMap.get(answer._id.toString());
+                const delivery = deliveryMap.get(answer._id.toString());
 
-                if (cr || star || model) {
+                if (cr || star || model || delivery) {
                     evaluation = {
                         content_relevance: cr ? { score: cr.score, notes: cr.notes } : null,
                         star_analysis: star ? { star_compliance_rating: star.star_compliance_rating, suggestions: star.suggestions } : null,
-                        model_answer: model ? { generated_text: model.generated_text } : null
+                        model_answer: model ? { generated_text: model.generated_text } : null,
+                        delivery: delivery ? { pace_wpm: delivery.pace_wpm, filler_word_count: delivery.filler_word_count, tone: delivery.tone, tone_analysis_status: delivery.tone_analysis_status } : null
                     };
                 }
 
@@ -153,7 +158,8 @@ const getFeedbackReportBySession = async (req, res) => {
                 evaluation = {
                     content_relevance: null,
                     star_analysis: null,
-                    model_answer: { generated_text: model.generated_text }
+                    model_answer: { generated_text: model.generated_text },
+                    delivery: null
                 };
             }
 
